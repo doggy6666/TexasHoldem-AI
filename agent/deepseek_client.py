@@ -31,7 +31,15 @@ class DeepSeekClient:
             model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash").strip(),
         )
 
-    def complete_json(self, system_prompt: str, user_prompt: str) -> dict:
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        max_tokens: int = 80,
+        temperature: float = 1.0,
+        timeout_seconds: float | None = None,
+    ) -> dict:
         payload = {
             "model": self.model,
             "messages": [
@@ -40,8 +48,8 @@ class DeepSeekClient:
             ],
             "response_format": {"type": "json_object"},
             "thinking": {"type": "disabled"},
-            "temperature": 1.0,
-            "max_tokens": 80,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
             "stream": False,
         }
         request = Request(
@@ -54,7 +62,10 @@ class DeepSeekClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(
+                request,
+                timeout=timeout_seconds or self.timeout_seconds,
+            ) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             raise DeepSeekError(f"DeepSeek HTTP {error.code}。") from None

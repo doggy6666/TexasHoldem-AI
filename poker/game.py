@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from agent.default_agent import choose_action
@@ -26,7 +27,7 @@ AVATAR_NICKNAMES = {
     3: "橙夏",
     4: "夜璃",
     5: "青禾",
-    6: "雪凛",
+    6: "白雪",
 }
 
 
@@ -60,7 +61,11 @@ class PokerGame:
     last_ai_sources: dict[int, str] = field(default_factory=dict)
     current_hand_record: dict = field(default_factory=dict)
     completed_hand_records: list[dict] = field(default_factory=list)
+    skipped_to_result: bool = False
+    fast_forward_chip_changes: dict[int, int] = field(default_factory=dict)
     pending_street_advance: bool = False
+    tutorial_mode: bool = False
+    all_in_showdown_revealed: bool = False
 
     def __post_init__(self) -> None:
         if not 2 <= self.total_players <= 4:
@@ -88,6 +93,13 @@ class PokerGame:
     @property
     def turn_is_human(self) -> bool:
         return self.turn_index == 0
+
+    @property
+    def ended_without_showdown(self) -> bool:
+        return bool(
+            self.result
+            and "因其他玩家全部弃牌" in self.result
+        )
 
     @property
     def minimum_raise_to(self) -> int:
@@ -128,10 +140,13 @@ class PokerGame:
         self.showdown_details = []
         self.last_actions = {}
         self.last_ai_sources = {}
+        self.skipped_to_result = False
+        self.fast_forward_chip_changes = {}
         self.pending_street_advance = False
         self.log = []
         self.acted = set()
         self.all_in_runout_pending = False
+        self.all_in_showdown_revealed = False
         self.hand_number += 1
         for player in self.players:
             player.reset_for_hand()
@@ -173,6 +188,66 @@ class PokerGame:
             return
         self.pending_street_advance = False
         self._advance_street()
+
+    def fast_forward_after_human_fold(
+        self,
+        max_steps: int = 300,
+        decision_provider=None,
+    ) -> None:
+        """真人弃牌后用本地 AI 快速完成牌局，并补全展示所需公共牌。"""
+        if self.status != "进行中" or not self.human.folded:
+            raise ValueError("只有真人已弃牌且牌局仍在进行时才能跳过。")
+        self.log.append("你选择跳过剩余过程，AI 对局将快速结算。")
+        for _ in range(max_steps):
+            if self.status == "已结束":
+                break
+            if self.all_in_runout_pending:
+                self.deal_next_all_in_street()
+            elif self.pending_street_advance:
+                self.continue_after_action()
+            elif self.turn_index not in {None, 0}:
+                # 默认使用本地 AI；教程可以注入只跟注或过牌的固定策略。
+                self.play_next_ai_turn(decision_provider)
+            else:
+                raise RuntimeError("跳过结算遇到无法继续的牌局状态。")
+        else:
+            raise RuntimeError("跳过结算超过最大行动次数。")
+
+        self._complete_board_for_skipped_display()
+        starting_chips = self.current_hand_record.get("starting_chips", {})
+        self.fast_forward_chip_changes = {
+            index: player.chips - starting_chips.get(index, player.chips)
+            for index, player in enumerate(self.players)
+        }
+        self.skipped_to_result = True
+
+    def _complete_board_for_skipped_display(self) -> None:
+        """牌局已结算后补全五张公共牌，仅用于跳过结果展示。"""
+        dealt_extra_cards = False
+        while len(self.community_cards) < 5:
+            count = 3 if not self.community_cards else 1
+            self.community_cards.extend(
+                self.deck.deal(min(count, 5 - len(self.community_cards)))
+            )
+            dealt_extra_cards = True
+        self.street_index = 2
+        if dealt_extra_cards:
+            self.reveal_id += 1
+            self.log.append("已补全五张公共牌用于展示，不改变已经完成的结算。")
+        self._build_showdown_details()
+        if self.current_hand_record:
+            self.current_hand_record["final_community_cards"] = [
+                str(card) for card in self.community_cards
+            ]
+            self.current_hand_record["showdown"] = list(self.showdown_details)
+            if (
+                self.completed_hand_records
+                and self.completed_hand_records[-1].get("hand_number")
+                == self.hand_number
+            ):
+                self.completed_hand_records[-1] = deepcopy(
+                    self.current_hand_record
+                )
 
     def _apply_action(self, index: int, action: str, amount: int = 0) -> None:
         player = self.players[index]
@@ -281,6 +356,7 @@ class PokerGame:
 
     def _schedule_all_in_runout(self) -> None:
         self.pots = build_pots(self.players)
+        self.all_in_showdown_revealed = True
         if len(self.community_cards) >= 5:
             self._showdown()
             return
@@ -355,6 +431,11 @@ class PokerGame:
                 continue
             if player.folded:
                 details.append(f"{player.name}｜已弃牌，手牌未公开")
+                continue
+            if self.ended_without_showdown:
+                details.append(
+                    f"{player.name}｜其他玩家均已弃牌，手牌未公开"
+                )
                 continue
             cards = "、".join(str(card) for card in player.hole_cards)
             if len(player.hole_cards) + len(self.community_cards) >= 5:

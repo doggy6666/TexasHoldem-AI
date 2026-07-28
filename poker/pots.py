@@ -23,6 +23,11 @@ def build_pots(players: list[Player]) -> list[Pot]:
         amount = (level - previous) * len(contributors)
         eligible = {player.seat for player in contributors if not player.folded}
         if amount:
-            pots.append(Pot(amount, eligible))
+            # 弃牌玩家在不同额度投入会形成数学分层；若相邻分层的获胜资格
+            # 完全相同，它们仍属于同一个池，不应在界面伪装成多个边池。
+            if pots and pots[-1].eligible_seats == eligible:
+                pots[-1].amount += amount
+            else:
+                pots.append(Pot(amount, eligible))
         previous = level
     return pots

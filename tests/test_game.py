@@ -1,3 +1,7 @@
+import random
+
+import pytest
+
 from poker.cards import Card
 from poker.game import AVATAR_NICKNAMES, PokerGame
 from poker.pots import build_pots
@@ -33,6 +37,20 @@ def test_multiple_all_ins_create_main_and_side_pot():
     assert [pot.amount for pot in pots] == [300, 200]
     assert pots[0].eligible_seats == {0, 1, 2}
     assert pots[1].eligible_seats == {1, 2}
+
+
+def test_folded_contribution_levels_with_same_eligible_players_are_one_pot():
+    game = PokerGame(total_players=4)
+    for player, amount in zip(game.players, [80, 20, 50, 80]):
+        player.hand_contribution = amount
+    game.players[1].folded = True
+    game.players[2].folded = True
+
+    pots = build_pots(game.players)
+
+    assert len(pots) == 1
+    assert pots[0].amount == 230
+    assert pots[0].eligible_seats == {0, 3}
 
 
 def test_main_and_side_pots_are_awarded_to_eligible_winners():
@@ -230,6 +248,25 @@ def test_folded_ai_hand_is_never_in_showdown_details():
     assert str(game.players[1].hole_cards[0]) not in folded_detail
 
 
+def test_winner_hand_stays_hidden_when_everyone_else_folds():
+    game = PokerGame(total_players=3)
+    game.start_hand()
+    winner = game.players[2]
+    winner_cards = [str(card) for card in winner.hole_cards]
+
+    game.human_action("fold")
+    game._apply_action(1, "fold")
+
+    assert game.status == "已结束"
+    assert game.ended_without_showdown is True
+    winner_detail = next(
+        detail for detail in game.showdown_details
+        if detail.startswith(f"{winner.name}｜")
+    )
+    assert "其他玩家均已弃牌，手牌未公开" in winner_detail
+    assert all(card not in winner_detail for card in winner_cards)
+
+
 def test_call_action_reports_target_total_not_increment():
     game = PokerGame(total_players=2)
     game.start_hand()
@@ -276,3 +313,41 @@ def test_showdown_rebuilds_stale_pots_after_refunding_unique_excess():
     assert game.players[3].chips == 3600
     assert all(player.hand_contribution == 900 for player in game.players)
     assert "边池" not in game.result
+
+
+def test_human_can_skip_remaining_ai_play_after_folding():
+    random.seed(7)
+    game = PokerGame(total_players=4)
+    game.start_hand()
+    starting_total = sum(player.chips for player in game.players) + game.pot
+    game._apply_action(3, "call")
+    assert game.turn_is_human
+    game.human_action("fold")
+
+    assert game.status == "进行中"
+    game.fast_forward_after_human_fold()
+
+    assert game.status == "已结束"
+    assert game.skipped_to_result is True
+    assert len(game.community_cards) == 5
+    assert sum(game.fast_forward_chip_changes.values()) == 0
+    assert sum(player.chips for player in game.players) == starting_total
+    for player in game.players[1:]:
+        detail = next(
+            item for item in game.showdown_details
+            if item.startswith(f"{player.name}｜")
+        )
+        if player.folded:
+            assert "手牌未公开" in detail
+            assert str(player.hole_cards[0]) not in detail
+        else:
+            assert "手牌：" in detail
+            assert str(player.hole_cards[0]) in detail
+
+
+def test_skip_is_rejected_before_human_folds():
+    game = PokerGame(total_players=4)
+    game.start_hand()
+
+    with pytest.raises(ValueError, match="真人已弃牌"):
+        game.fast_forward_after_human_fold()

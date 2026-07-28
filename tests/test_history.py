@@ -56,3 +56,40 @@ def test_training_summary_reports_behavior_without_strategy_advice():
     assert summary["total_decisions"] == 1
     assert summary["action_counts"]["弃牌"] == 1
     assert summary["observations"]
+
+
+def test_eight_hands_form_explainable_session_profile():
+    records = []
+    for hand_number in range(1, 9):
+        action_name = "raise" if hand_number % 2 == 0 else "call"
+        records.append(
+            {
+                "starting_chips": {0: 1000},
+                "ending_chips": {0: 1010},
+                "final_community_cards": ["2♠", "3♥", "4♦", "5♣", "9♠"],
+                "actions": [
+                    {
+                        "seat": 0,
+                        "street": "翻前圈（pre-flop）",
+                        "action": action_name,
+                        "amount_to_call_before": 20,
+                    },
+                    {
+                        "seat": 0,
+                        "street": "翻牌圈（flop）",
+                        "action": "bet",
+                        "amount_to_call_before": 0,
+                    },
+                ],
+            }
+        )
+
+    summary = build_training_summary(records)
+
+    assert summary["profile_stage"] == "会话级稳定画像"
+    assert summary["profile_confidence"] == "中等"
+    assert summary["profile_name"] != "等待更多数据"
+    assert summary["profile_progress"] == 1.0
+    assert summary["metrics"]["vpip"] == 1.0
+    assert summary["metrics"]["preflop_raise_rate"] == 0.5
+    assert summary["training_focus"]

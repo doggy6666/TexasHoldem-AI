@@ -3,6 +3,53 @@
 from __future__ import annotations
 
 
+def authoritative_public_facts(game, player_index: int) -> dict:
+    """由本地规则生成，不让 LLM 自行猜测花色或盲注含义。"""
+    player = game.players[player_index]
+    hole_cards = player.hole_cards
+    same_suit = (
+        len(hole_cards) == 2
+        and hole_cards[0].suit == hole_cards[1].suit
+    )
+    paired = (
+        len(hole_cards) == 2
+        and hole_cards[0].rank == hole_cards[1].rank
+    )
+    voluntary_actions = list(
+        game.current_hand_record.get("actions", [])
+    )
+    opponent_aggressive_actions = [
+        {
+            "seat": action["seat"],
+            "player_name": action["player_name"],
+            "street": action["street"],
+            "action": action["action"],
+            "action_text": action["action_text"],
+        }
+        for action in voluntary_actions
+        if action.get("seat") != player_index
+        and action.get("action") in {"bet", "raise", "all_in"}
+    ]
+    return {
+        "your_hole_cards": [str(card) for card in hole_cards],
+        "your_two_cards_same_suit": same_suit,
+        "your_two_cards_are_pair": paired,
+        "blind_posts": {
+            "small_blind_seat": game.small_blind_index,
+            "small_blind_amount": game.small_blind,
+            "big_blind_seat": game.big_blind_index,
+            "big_blind_amount": game.big_blind,
+            "rule": "盲注是强制投入，不属于下注、加注或玩家主动行动。",
+        },
+        "opponent_voluntary_aggressive_actions": (
+            opponent_aggressive_actions
+        ),
+        "opponent_voluntary_aggression_count": len(
+            opponent_aggressive_actions
+        ),
+    }
+
+
 def legal_actions_for(game, player_index: int) -> dict:
     player = game.players[player_index]
     required = game.amount_to_call(player_index)
@@ -55,6 +102,9 @@ def build_decision_context(
                 "all_in": opponent.all_in,
             }
         )
+    voluntary_actions = list(
+        game.current_hand_record.get("actions", [])
+    )
     context = {
         "street": game.street_name,
         "dealer_seat": game.dealer_index,
@@ -66,7 +116,20 @@ def build_decision_context(
         "your_street_bet": player.street_bet,
         "your_hand_contribution": player.hand_contribution,
         "opponents": opponents,
-        "recent_public_actions": game.log[-16:],
+        "recent_public_actions": [
+            {
+                "street": action["street"],
+                "seat": action["seat"],
+                "player_name": action["player_name"],
+                "action": action["action"],
+                "action_text": action["action_text"],
+            }
+            for action in voluntary_actions[-16:]
+        ],
+        "authoritative_facts": authoritative_public_facts(
+            game,
+            player_index,
+        ),
         "legal_actions": legal_actions_for(game, player_index),
     }
     if behavior_hint:
