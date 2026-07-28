@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.streamlit/secrets.toml
+.env
+
+AGENTS.md
+PROJECT.md
