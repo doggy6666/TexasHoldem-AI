@@ -1,8 +1,12 @@
 """TexasHoldem AI：2–4 人桌、四种模式与 DeepSeek AI。"""
 
 import base64
+from html import escape
+import importlib
+import inspect
 import os
 import random
+import re
 import time
 from pathlib import Path
 
@@ -26,80 +30,44 @@ from poker.tutorial import (
     create_tutorial_game,
     tutorial_strategy_tip,
 )
+from ui_table import (
+    PlayerView,
+    build_header_html,
+    build_table_html,
+    card_backs_html,
+    cards_html,
+)
+from ui_theme import APP_CSS
+import audio_manager
+
+# Streamlit can rerun this file while keeping an earlier dependency module cached.
+# Reload only when that cached module exposes the old audio-player interface.
+if "track_names" not in inspect.signature(audio_manager.render_audio).parameters:
+    audio_manager = importlib.reload(audio_manager)
 
 
-st.set_page_config(page_title="TexasHoldem AI", page_icon="🂡", layout="wide")
-st.markdown("""<style>
-[data-testid="stAppViewBlockContainer"] {padding-top:1.25rem !important;}
-[data-testid="stHeader"] {height:2rem;}
-.poker-card {display:inline-block; min-width:42px; margin:2px; padding:7px 9px;
-border:1px solid #cbd5e1; border-radius:7px; background:#fff; font-size:1.35rem;
-font-weight:700; text-align:center; box-shadow:0 1px 2px #cbd5e1;}
-.poker-card.red {color:#dc2626;} .poker-card.black {color:#111827;}
-.poker-card.back {min-width:42px; height:48px; padding:0;
-border:3px solid #f8fafc; outline:1px solid #1d4ed8;
-background:
-  repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.28) 4px 6px),
-  repeating-linear-gradient(-45deg, transparent 0 4px, rgba(255,255,255,.18) 4px 6px),
-  #2563eb;}
-.poker-card.new-card {animation:card-back-arrive .35s cubic-bezier(.2,1.3,.4,1);}
-.poker-card.dealt {animation:card-flip .55s cubic-bezier(.2,.8,.3,1);}
-.community-board {height:64px; display:flex; align-items:center; gap:4px; box-sizing:border-box;}
-.hand-slot {height:64px; display:flex; align-items:center; gap:4px; box-sizing:border-box;}
-.player-seat {width:100%;}
-.seat-header {height:155px; display:grid; grid-template-columns:minmax(0, 1fr) 144px;
-align-items:start; box-sizing:border-box;}
-.seat-name {margin:0 0 14px; font-size:1.5rem; line-height:1.4; font-weight:700; color:#262730;}
-.ai-level {display:inline-block; margin-left:8px; padding:2px 7px; border-radius:999px;
-background:#e0f2fe; color:#075985; font-size:.75rem; font-weight:700; vertical-align:middle;}
-.seat-label {margin-bottom:2px; font-size:.875rem; color:#4b5563;}
-.seat-chips {font-size:1.75rem; line-height:1.4; color:#31333f;}
-.seat-avatar {width:144px; height:144px;}
-.seat-avatar img {display:block; width:144px; height:144px; object-fit:cover; border-radius:8px;}
-.seat-contribution {height:32px; box-sizing:border-box; font-size:.875rem; color:#808495;}
-.action-card {height:44px; box-sizing:border-box; margin-top:8px; padding:10px 12px;
-border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1e3a8a;
-font-weight:700; animation:action-snap .48s cubic-bezier(.2,1.4,.4,1);}
-.action-card.waiting {border-color:#cbd5e1; background:#f8fafc; color:#64748b;}
-.action-card.danger {border-color:#fca5a5; background:#fef2f2; color:#b91c1c;}
-.action-card.acting {border-color:#f59e0b; background:#fffbeb; color:#92400e;
-animation:action-pulse .8s ease-in-out infinite alternate;}
-.action-card.human-turn {
-animation:action-wiggle .7s ease-in-out infinite, action-pulse .8s ease-in-out infinite alternate;}
-@keyframes action-snap {
-  0% {transform:translateY(-12px) scale(.94) rotate(-1deg);}
-  65% {transform:translateY(3px) scale(1.03) rotate(.4deg);}
-  100% {transform:translateY(0) scale(1) rotate(0);}
-}
-@keyframes action-pulse {
-  from {box-shadow:0 0 0 0 rgba(245,158,11,.15);}
-  to {box-shadow:0 0 0 4px rgba(245,158,11,.32);}
-}
-@keyframes action-wiggle {
-  0%, 100% {transform:translateX(0) rotate(0);}
-  25% {transform:translateX(-4px) rotate(-.45deg);}
-  75% {transform:translateX(4px) rotate(.45deg);}
-}
-@keyframes card-back-arrive {
-  from {transform:translateX(-18px) scale(.9);}
-  to {transform:translateX(0) scale(1);}
-}
-@keyframes card-flip {
-  0% {transform:rotateY(90deg) scale(.92);}
-  65% {transform:rotateY(-8deg) scale(1.04);}
-  100% {transform:rotateY(0) scale(1);}
-}
-</style>""", unsafe_allow_html=True)
-st.title("TexasHoldem AI｜德州扑克智能对战")
-st.caption("第四阶段：多人 AI 对战、实时策略提示、深度复盘与陪练记录")
+st.set_page_config(
+    page_title="TexasHoldem AI",
+    page_icon="🂡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+st.markdown(APP_CSS, unsafe_allow_html=True)
+MATCH_BGM_TRACKS = tuple(
+    name for name in audio_manager.BGM_TRACKS if name != "Experience"
+)
 
 if "game" not in st.session_state:
     st.session_state.game = PokerGame()
 game: PokerGame = st.session_state.game
-if "selected_mode_key" not in st.session_state:
-    st.session_state.selected_mode_key = "simple"
 if "active_mode_key" not in st.session_state:
     st.session_state.active_mode_key = "simple"
+if "match_settings" not in st.session_state:
+    st.session_state.match_settings = {
+        "mode_key": "simple",
+        "player_count": game.total_players,
+        "custom_labels": {},
+    }
 if "shown_community_count" not in st.session_state:
     st.session_state.shown_community_count = len(game.community_cards)
 if "community_flip_from" not in st.session_state:
@@ -122,11 +90,60 @@ if "flow_transition_key" not in st.session_state:
     st.session_state.flow_transition_key = None
 if "flow_transition_deadline" not in st.session_state:
     st.session_state.flow_transition_deadline = 0.0
+if "hole_deal_animation_deadline" not in st.session_state:
+    st.session_state.hole_deal_animation_deadline = 0.0
+if "fold_animation_deadlines" not in st.session_state:
+    st.session_state.fold_animation_deadlines = {}
+if "previously_folded_seats" not in st.session_state:
+    st.session_state.previously_folded_seats = set()
+if "strategy_panel_open" not in st.session_state:
+    st.session_state.strategy_panel_open = False
+if "audio_match_playlist" not in st.session_state:
+    st.session_state.audio_match_playlist = False
+if "audio_playlist_id" not in st.session_state:
+    st.session_state.audio_playlist_id = ""
+if "audio_muted" not in st.session_state:
+    st.session_state.audio_muted = False
+if "audio_volume_percent" not in st.session_state:
+    st.session_state.audio_volume_percent = 35
+elif st.session_state.audio_volume_percent < 35:
+    st.session_state.audio_volume_percent = 35
+if "user_nickname" not in st.session_state:
+    st.session_state.user_nickname = None
+
+
+def normalize_nickname(value: str) -> str:
+    """Keep the player label compact enough for every seat layout."""
+    compact = " ".join(value.replace("\n", " ").split())
+    return compact[:12] or "创作者Zikky"
+
+
+if not st.session_state.user_nickname:
+    st.markdown(
+        '<div class="nickname-gate-title">TexasHoldem AI</div>',
+        unsafe_allow_html=True,
+    )
+    nickname_input = st.text_input(
+        "请输入您的昵称",
+        value="",
+        placeholder="创作者Zikky",
+        max_chars=12,
+        key="nickname_input",
+    )
+    if st.button("进入牌局", key="nickname_submit", use_container_width=True):
+        st.session_state.user_nickname = normalize_nickname(nickname_input)
+        st.session_state.audio_match_playlist = False
+        st.session_state.audio_playlist_id = ""
+        st.rerun()
+    st.stop()
+
 AVATAR_DIR = Path(__file__).parent / "assets" / "avatars"
 COMMUNITY_CARD_BACK_SECONDS = 0.7
 AI_ACTION_DELAY_SECONDS = 1.25
 ALL_IN_DEAL_DELAY_SECONDS = 0.6
 STREET_TRANSITION_DELAY_SECONDS = 0.75
+HOLE_DEAL_ANIMATION_SECONDS = 0.95
+FOLD_CARD_EXIT_SECONDS = 0.42
 GAME_RULES_MARKDOWN = """
 #### 1. 游戏目标
 
@@ -204,10 +221,10 @@ def completed_training_records(records):
     return [record for record in records if not record.get("tutorial")]
 
 
-def mark_custom_ai_as_manual():
-    """玩家手动改动任一座位后，不再视作随机隐藏配置。"""
-    st.session_state.custom_ai_randomized = False
-    st.session_state.custom_ai_randomized_count = None
+def action_label_for_seat(action_text: str) -> str:
+    """Keep seat HUD actions concise by removing English parentheticals."""
+    return re.sub(r"（[^（）]*[A-Za-z][^（）]*）", "", action_text).strip()
+
 
 # 兼容热更新前已存在的旧会话，同时确保头像与昵称固定对应。
 for player_index, existing_player in enumerate(game.players):
@@ -228,24 +245,6 @@ if not hasattr(game, "fast_forward_chip_changes"):
     game.fast_forward_chip_changes = {}
 if not hasattr(game, "all_in_showdown_revealed"):
     game.all_in_showdown_revealed = False
-
-
-def cards_html(cards, empty="尚未发牌", animate_from=None):
-    if not cards:
-        return empty
-    rendered = []
-    for index, card in enumerate(cards):
-        animation_class = " dealt" if animate_from is not None and index >= animate_from else ""
-        color_class = "red" if card.suit in {"♥", "♦"} else "black"
-        rendered.append(f'<span class="poker-card {color_class}{animation_class}">{card}</span>')
-    return "".join(rendered)
-
-
-def card_backs_html(count=2, extra_class=""):
-    return "".join(
-        f'<span class="poker-card back {extra_class}" aria-label="隐藏的牌"></span>'
-        for _ in range(count)
-    )
 
 
 def readable_action_rows(record, human_only=True):
@@ -275,145 +274,229 @@ def avatar_data_uri(path: str):
     return f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
 
-custom_ai_labels = []
-with st.sidebar:
-    mode_options = list(GAME_MODES.values())
-    selected_mode_index = next(
-        (
-            index
-            for index, mode in enumerate(mode_options)
-            if mode.key == st.session_state.selected_mode_key
-        ),
-        0,
+def begin_hole_deal_animation():
+    """短时间内为新一局的手牌启用从桌面中央发出的动画。"""
+    st.session_state.hole_deal_animation_deadline = (
+        time.monotonic() + HOLE_DEAL_ANIMATION_SECONDS
     )
-    selected_mode_label = st.radio(
+
+
+def ensure_match_bgm():
+    """Start the post-entry playlist once, then keep it across UI reruns."""
+    if st.session_state.audio_match_playlist:
+        return
+    st.session_state.audio_match_playlist = True
+    st.session_state.audio_playlist_id = str(time.time_ns())
+
+
+def launch_new_match(
+    selected_mode,
+    selected_count,
+    custom_labels=None,
+    random_start=False,
+):
+    st.session_state.match_settings = {
+        "mode_key": selected_mode.key,
+        "player_count": selected_count,
+        "custom_labels": (
+            {
+                seat: label
+                for seat, label in enumerate(custom_labels or [], start=1)
+            }
+            if selected_mode.key == "custom"
+            else {}
+        ),
+    }
+    current_game = st.session_state.game
+    st.session_state.training_records.extend(
+        completed_training_records(
+            getattr(current_game, "completed_hand_records", [])
+        )
+    )
+    new_game = PokerGame(total_players=selected_count)
+    assigned_personas = personas_for_mode(
+        selected_mode.key,
+        selected_count - 1,
+        custom_labels=custom_labels if selected_mode.key == "custom" else None,
+    )
+    for seat, persona in enumerate(assigned_personas, start=1):
+        new_game.players[seat].ai_persona = persona
+    new_game.start_hand()
+    st.session_state.game = new_game
+    st.session_state.active_mode_key = selected_mode.key
+    st.session_state.hide_active_ai_styles = random_start
+    st.session_state.custom_ai_randomized = bool(
+        random_start and selected_mode.key == "custom"
+    )
+    st.session_state.custom_ai_randomized_count = (
+        selected_count if st.session_state.custom_ai_randomized else None
+    )
+    st.session_state.shown_community_count = 0
+    st.session_state.community_flip_from = None
+    st.session_state.strategy_panel_open = False
+    st.session_state.settings_dialog_open = False
+    st.session_state.rules_dialog_open = False
+    ensure_match_bgm()
+    begin_hole_deal_animation()
+    st.rerun()
+
+
+def launch_quick_match():
+    """Use the current settings and immediately start a fresh match."""
+    settings = st.session_state.match_settings
+    selected_mode = GAME_MODES.get(settings["mode_key"], mode_options[0])
+    selected_count = int(settings["player_count"])
+    custom_labels = []
+    if selected_mode.key == "custom":
+        custom_labels = [
+            settings["custom_labels"].get(seat, "菜鸟")
+            for seat in range(1, selected_count)
+        ]
+    launch_new_match(
+        selected_mode,
+        selected_count,
+        custom_labels=custom_labels,
+    )
+
+
+def launch_tutorial_match():
+    current_game = st.session_state.game
+    st.session_state.training_records.extend(
+        completed_training_records(
+            getattr(current_game, "completed_hand_records", [])
+        )
+    )
+    st.session_state.game = create_tutorial_game()
+    st.session_state.active_mode_key = "tutorial"
+    st.session_state.hide_active_ai_styles = False
+    st.session_state.shown_community_count = 0
+    st.session_state.community_flip_from = None
+    st.session_state.strategy_panel_open = False
+    st.session_state.settings_dialog_open = False
+    st.session_state.rules_dialog_open = False
+    ensure_match_bgm()
+    begin_hole_deal_animation()
+    st.rerun()
+
+
+mode_options = list(GAME_MODES.values())
+saved_mode = GAME_MODES.get(
+    st.session_state.match_settings["mode_key"],
+    mode_options[0],
+)
+st.session_state.setdefault("settings_dialog_open", False)
+st.session_state.setdefault("rules_dialog_open", False)
+
+
+def close_settings_dialog():
+    st.session_state.settings_dialog_open = False
+
+
+@st.dialog("游戏设置", width="large", on_dismiss=close_settings_dialog)
+def settings_dialog():
+    settings = st.session_state.match_settings
+    dialog_mode_label = st.radio(
         "游戏模式",
         [mode.label for mode in mode_options],
-        index=selected_mode_index,
-        disabled=game.status == "进行中",
+        index=[
+            mode.label for mode in mode_options
+        ].index(saved_mode.label),
+        key="settings_mode_label",
     )
     selected_mode = next(
-        mode for mode in mode_options if mode.label == selected_mode_label
+        mode for mode in mode_options if mode.label == dialog_mode_label
     )
-    st.session_state.selected_mode_key = selected_mode.key
     st.subheader(f"{selected_mode.label}设置")
     st.caption(f"AI 对手：{selected_mode.ai_label}")
-    selected_count = st.selectbox("总人数（players）", [2, 3, 4], index=game.total_players - 2, disabled=game.status == "进行中")
-    random_start_requested = False
-    manual_start_available = True
+    selected_count = st.selectbox(
+        "总人数（players）",
+        [2, 3, 4],
+        index=settings["player_count"] - 2,
+        key="settings_player_count",
+    )
+    custom_labels = []
     if selected_mode.key == "custom":
         secret_random_match = bool(
             st.session_state.active_mode_key == "custom"
             and st.session_state.hide_active_ai_styles
         )
         if secret_random_match:
-            manual_start_available = False
             st.caption("当前为随机 AI 对局，所有 AI 风格全程保密。")
         else:
             for seat in range(1, selected_count):
-                custom_ai_labels.append(
+                custom_labels.append(
                     st.selectbox(
                         f"AI 座位 {seat}",
-                        ["新手 AI", "进阶 AI", "高手 AI"],
-                        key=f"custom_ai_{seat}",
-                        disabled=game.status == "进行中",
-                        on_change=mark_custom_ai_as_manual,
+                        ["菜鸟", "进阶", "高手"],
+                        index=["菜鸟", "进阶", "高手"].index(
+                            settings["custom_labels"].get(seat, "菜鸟")
+                        ),
+                        key=f"settings_custom_ai_{seat}",
                     )
                 )
-    manual_start_requested = False
-    if manual_start_available:
-        manual_start_requested = st.button(
-            "开始新对局（new match）",
-            disabled=not selected_mode.enabled,
-            use_container_width=True,
-        )
-    if selected_mode.key == "custom":
-        random_start_requested = st.button(
-            "以随机 AI 开始新对局",
-            use_container_width=True,
-            help=(
-                "按当前人数秘密随机分配新手、进阶或高手 AI，"
-                "并立即开始新对局。"
-            ),
-        )
-        if random_start_requested:
-            custom_ai_labels = [
-                random.choice(["新手 AI", "进阶 AI", "高手 AI"])
-                for _ in range(selected_count - 1)
-            ]
-            st.session_state.custom_ai_randomized = True
-            st.session_state.custom_ai_randomized_count = selected_count
-        if (
-            secret_random_match
-            and game.status != "进行中"
-            and st.button(
-                "返回手动自定义",
-                use_container_width=True,
-            )
-        ):
-            st.session_state.training_records.extend(
-                completed_training_records(
-                    getattr(game, "completed_hand_records", [])
-                )
-            )
-            mark_custom_ai_as_manual()
-            st.session_state.game = PokerGame(
-                total_players=selected_count
-            )
-            st.session_state.hide_active_ai_styles = False
-            st.session_state.shown_community_count = 0
-            st.session_state.community_flip_from = None
-            st.rerun()
-    if random_start_requested or manual_start_requested:
-        if not random_start_requested:
-            mark_custom_ai_as_manual()
-        st.session_state.training_records.extend(
-            completed_training_records(
-                getattr(game, "completed_hand_records", [])
-            )
-        )
-        new_game = PokerGame(total_players=selected_count)
-        assigned_personas = personas_for_mode(
-            selected_mode.key,
-            selected_count - 1,
-            custom_labels=custom_ai_labels if selected_mode.key == "custom" else None,
-        )
-        for seat, persona in enumerate(assigned_personas, start=1):
-            new_game.players[seat].ai_persona = persona
-        new_game.start_hand()
-        st.session_state.game = new_game
-        st.session_state.active_mode_key = selected_mode.key
-        st.session_state.hide_active_ai_styles = random_start_requested
-        st.session_state.shown_community_count = 0
-        st.session_state.community_flip_from = None
-        st.rerun()
-    api_configured = bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
-    if selected_mode.key == "offline":
-        st.caption("线下对战：仅使用默认 AI，不调用 API，不消耗 Token")
-    else:
-        st.caption(f"DeepSeek API：{'已配置' if api_configured else '未配置，将使用本地兜底'}")
-    st.caption("盲注：小盲 10｜大盲 20")
-    with st.expander("游戏规则", expanded=False):
-        st.markdown(GAME_RULES_MARKDOWN)
-    if getattr(game, "tutorial_mode", False):
-        st.caption("当前牌桌：固定四人示例对局（不调用联网 AI）")
+    st.session_state.match_settings = {
+        "mode_key": selected_mode.key,
+        "player_count": selected_count,
+        "custom_labels": (
+            {
+                seat: label
+                for seat, label in enumerate(custom_labels, start=1)
+            }
+            if selected_mode.key == "custom"
+            else {}
+        ),
+    }
     if st.button(
-        "示例对局",
-        disabled=game.status == "进行中",
+        "开始新对局",
+        key="dialog_start_match",
         use_container_width=True,
-        help="进入固定四人教学牌局，不调用 DeepSeek。",
     ):
-        st.session_state.training_records.extend(
-            completed_training_records(
-                getattr(game, "completed_hand_records", [])
-            )
+        launch_new_match(
+            selected_mode,
+            selected_count,
+            custom_labels=custom_labels,
         )
-        st.session_state.game = create_tutorial_game()
-        st.session_state.active_mode_key = "tutorial"
-        st.session_state.hide_active_ai_styles = False
-        st.session_state.shown_community_count = 0
-        st.session_state.community_flip_from = None
-        st.rerun()
+    if selected_mode.key == "custom" and st.button(
+        "以随机 AI 开始新对局",
+        key="dialog_random_match",
+        use_container_width=True,
+        help="按当前人数秘密随机分配菜鸟、进阶或高手，并立即开始新对局。",
+    ):
+        random_labels = [
+            random.choice(["菜鸟", "进阶", "高手"])
+            for _ in range(selected_count - 1)
+        ]
+        launch_new_match(
+            selected_mode,
+            selected_count,
+            custom_labels=random_labels,
+            random_start=True,
+        )
+    api_configured = bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
+    st.caption(
+        "线下对战"
+        if selected_mode.key == "offline"
+        else (
+            "DeepSeek API：已配置"
+            if api_configured
+            else "未配置，使用兜底方案"
+        )
+    )
+    st.caption("盲注：小盲 10｜大盲 20")
+
+
+@st.dialog("游戏规则", width="large")
+def rules_dialog():
+    st.markdown(GAME_RULES_MARKDOWN)
+
+
+if st.session_state.settings_dialog_open:
+    settings_dialog()
+elif st.session_state.rules_dialog_open:
+    # Rules have no interactive controls, so render the dialog once only.
+    # This prevents unrelated game-action reruns from reopening it.
+    st.session_state.rules_dialog_open = False
+    rules_dialog()
 
 if st.session_state.shown_community_count > len(game.community_cards):
     st.session_state.shown_community_count = 0
@@ -426,388 +509,230 @@ if game.dealer_index >= 0:
     dealer_name = game.players[game.dealer_index].name
 else:
     dealer_name = "尚未确定"
-st.info(f"状态：{game.status}｜{game.street_name}｜庄家（dealer）：{dealer_name}｜底池（pot）：{game.pot}")
-if getattr(game, "tutorial_mode", False):
-    st.info(
-        "示例对局：你固定持有 A♠、K♠。轮到你时先点击“实时策略提示”，"
-        "再根据提示完成翻牌前、翻牌圈、转牌圈和河牌圈；教程 AI 只会跟注或过牌。"
-    )
 
-columns = st.columns(game.total_players)
 ended_without_showdown = getattr(
     game,
     "ended_without_showdown",
     bool(game.result and "因其他玩家全部弃牌" in game.result),
 )
-for index, player in enumerate(game.players):
-    with columns[index]:
-        marker = " 👑庄家" if index == game.dealer_index else ""
-        if index == 0 or st.session_state.hide_active_ai_styles:
-            public_name = player.name
-        else:
-            public_name = (
-                f'{player.name}<span class="ai-level">'
-                f'{"教程 AI" if getattr(game, "tutorial_mode", False) else ("默认 AI" if getattr(game, "last_ai_sources", {}).get(index) == "默认 AI 已接管" else public_label_for_persona(getattr(player, "ai_persona", NOVICE)))}'
-                "</span>"
-            )
-        is_out = game.is_out(index)
-        if index == 0:
-            visible_cards = cards_html(player.hole_cards) if player.hole_cards else card_backs_html()
-            avatar_html = ""
-        elif (
-            (
-                game.status == "已结束"
-                and not board_reveal_pending
-                and not ended_without_showdown
-            )
-            or getattr(game, "all_in_showdown_revealed", False)
-        ):
-            visible_cards = (
-                cards_html(player.hole_cards)
-                if not player.folded
-                else card_backs_html()
-            )
-            avatar_id = getattr(player, "avatar_id", None) or ((index - 1) % 6 + 1)
-            avatar_src = avatar_data_uri(str(AVATAR_DIR / f"ai_{avatar_id}.png"))
-            avatar_html = f'<img src="{avatar_src}" alt="{player.name}的头像">'
-        else:
-            visible_cards = card_backs_html()
-            avatar_id = getattr(player, "avatar_id", None) or ((index - 1) % 6 + 1)
-            avatar_src = avatar_data_uri(str(AVATAR_DIR / f"ai_{avatar_id}.png"))
-            avatar_html = f'<img src="{avatar_src}" alt="{player.name}的头像">'
-        last_actions = getattr(game, "last_actions", {})
-        if is_out:
-            action_text, action_style = "已离场（out）", "danger"
-        elif player.folded:
-            action_text, action_style = "已弃牌（folded）", "danger"
-        elif player.all_in:
-            action_text = last_actions.get(index, "全下（all in）")
-            action_style = ""
-        elif game.turn_index == index:
-            if index == 0:
-                action_text, action_style = "👉 轮到你行动（your turn）！", "acting human-turn"
-            else:
-                action_text, action_style = "🂡 正在思考（thinking）…", "acting"
-        elif index in last_actions:
-            action_text = f"最近行动：{last_actions[index]}"
-            action_style = ""
-        elif game.status == "进行中" and player.hole_cards:
-            action_text, action_style = "未行动（not acted）", "waiting"
-        else:
-            action_text, action_style = "等待开局", "waiting"
-        st.markdown(
-            f"""<div class="player-seat">
-  <div class="seat-header">
-    <div>
-      <div class="seat-name">{public_name}{marker}</div>
-      <div class="seat-label">筹码（chips）</div>
-      <div class="seat-chips">{player.chips}</div>
-    </div>
-    <div class="seat-avatar">{avatar_html}</div>
-  </div>
-  <div class="seat-contribution">本局投入：{player.hand_contribution}｜本轮下注：{player.street_bet}</div>
-  <div class="hand-slot"><span>手牌：</span>{visible_cards}</div>
-  <div class="action-card {action_style}">{action_text}</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-
-if (
-    game.status == "进行中"
-    and game.human.folded
-    and not board_reveal_pending
-):
-    st.info("你已弃牌，正在继续观看 AI 对局；也可以直接跳过剩余过程。")
-    _, skip_column, _ = st.columns([1, 1.3, 1])
-    with skip_column:
-        if st.button(
-            "跳过",
-            type="primary",
-            use_container_width=True,
-        ):
-            try:
-                if getattr(game, "tutorial_mode", False):
-                    game.fast_forward_after_human_fold(
-                        decision_provider=choose_tutorial_action
-                    )
-                else:
-                    # 普通牌局保持无参数调用，兼容热更新前创建的旧对象。
-                    game.fast_forward_after_human_fold()
-            except (RuntimeError, ValueError) as error:
-                st.error(f"暂时无法快速结算：{error}")
-            else:
-                st.session_state.shown_community_count = len(
-                    game.community_cards
-                )
-                st.session_state.community_flip_from = 0
-                st.rerun()
-    st.caption(
-        "快速结算使用本地默认 AI，不额外调用联网模型；"
-        "结算后会补齐五张公共牌，并公开所有未弃牌 AI 的手牌。"
+hole_deal_animation_active = (
+    time.monotonic() < st.session_state.hole_deal_animation_deadline
+)
+fold_animation_now = time.monotonic()
+folded_seats = {
+    index for index, player in enumerate(game.players) if player.folded
+}
+newly_folded_seats = folded_seats - st.session_state.previously_folded_seats
+for seat in newly_folded_seats:
+    st.session_state.fold_animation_deadlines[seat] = (
+        fold_animation_now + FOLD_CARD_EXIT_SECONDS
     )
+st.session_state.previously_folded_seats = folded_seats
+folding_card_seats = {
+    seat
+    for seat, deadline in st.session_state.fold_animation_deadlines.items()
+    if seat in folded_seats and deadline > fold_animation_now
+}
 
-st.subheader("公共牌（community cards）")
 if board_reveal_pending:
     new_card_count = len(game.community_cards) - shown_community_count
-    visible_board = (
-        cards_html(game.community_cards[:shown_community_count], empty="")
-        + card_backs_html(new_card_count, "new-card")
+    board_html = (
+        cards_html(game.community_cards[:shown_community_count])
+        + card_backs_html(
+            new_card_count,
+            animation_class="new-card",
+            order_offset=shown_community_count,
+        )
     )
 elif game.community_cards:
-    visible_board = cards_html(game.community_cards, animate_from=community_flip_from)
+    board_html = cards_html(
+        game.community_cards,
+        animate_from=community_flip_from,
+    )
 else:
-    visible_board = "尚未发出公共牌"
-st.markdown(f'<div class="community-board">{visible_board}</div>', unsafe_allow_html=True)
+    board_html = ""
 
-if game.pots:
-    st.caption(
-        "｜".join(
-            f"{'主池' if i == 0 else f'第 {i} 边池'}：{pot.amount} 筹码"
-            for i, pot in enumerate(game.pots)
+player_views = []
+for index, player in enumerate(game.players):
+    # All-in players stay visible until settlement; only eliminated AI leave.
+    if index > 0 and game.is_out(index):
+        continue
+    if index == 0 or st.session_state.hide_active_ai_styles:
+        style_label = ""
+    elif getattr(game, "tutorial_mode", False):
+        style_label = "教程"
+    elif getattr(game, "last_ai_sources", {}).get(index) == "默认 AI 已接管":
+        style_label = "默认"
+    else:
+        style_label = public_label_for_persona(
+            getattr(player, "ai_persona", NOVICE)
+        )
+
+    show_ai_cards = (
+        (
+            game.status == "已结束"
+            and not board_reveal_pending
+            and not ended_without_showdown
+        )
+        or getattr(game, "all_in_showdown_revealed", False)
+    )
+    animation_class = "deal-in" if hole_deal_animation_active else ""
+    order_offset = index * 2
+    hole_cards_exiting = index in folding_card_seats
+    if player.folded and not hole_cards_exiting:
+        visible_cards = ""
+    elif index == 0:
+        visible_cards = (
+            cards_html(
+                player.hole_cards,
+                animation_class=animation_class,
+                order_offset=order_offset,
+            )
+            if player.hole_cards
+            else ""
+        )
+    elif show_ai_cards and not player.folded:
+        visible_cards = cards_html(player.hole_cards)
+    elif player.hole_cards:
+        visible_cards = card_backs_html(
+            2,
+            animation_class=animation_class,
+            order_offset=order_offset,
+        )
+    else:
+        visible_cards = ""
+
+    is_out = game.is_out(index)
+    last_actions = getattr(game, "last_actions", {})
+    if is_out:
+        action_text, action_style = "已离场", "danger"
+    elif player.folded:
+        action_text, action_style = "已弃牌", "danger"
+    elif player.all_in:
+        action_text = last_actions.get(index, "全下")
+        action_style = ""
+    elif game.turn_index == index:
+        if index == 0:
+            action_text, action_style = "👉 轮到你行动！", "acting"
+        else:
+            action_text, action_style = "🂡 正在思考…", "acting"
+    elif index in last_actions:
+        action_text = f"最近行动：{last_actions[index]}"
+        action_style = ""
+    elif game.status == "进行中" and player.hole_cards:
+        action_text, action_style = "未行动", ""
+    else:
+        action_text, action_style = "等待开局", ""
+
+    if player.hand_contribution:
+        action_text = f"{action_text} · 本局投入：{player.hand_contribution}"
+    action_text = action_label_for_seat(action_text)
+
+    avatar_src = ""
+    if index > 0:
+        avatar_id = getattr(player, "avatar_id", None) or (
+            (index - 1) % 6 + 1
+        )
+        avatar_src = avatar_data_uri(
+            str(AVATAR_DIR / f"ai_{avatar_id}.png")
+        )
+    player_views.append(
+        PlayerView(
+            name=(
+                st.session_state.user_nickname
+                if index == 0
+                else player.name
+            ),
+            chips=player.chips,
+            status=action_text,
+            status_class=action_style,
+            avatar_src=avatar_src,
+            style_label=style_label,
+            is_dealer=index == game.dealer_index,
+            is_human=index == 0,
+            hole_cards_html=visible_cards,
+            hole_cards_exiting=hole_cards_exiting,
         )
     )
 
-if game.status == "进行中" and game.turn_is_human and not board_reveal_pending:
-    st.divider()
-    st.subheader("你的行动（your action）")
-    tutorial_is_active = getattr(game, "tutorial_mode", False)
-    coaching_is_online = st.session_state.active_mode_key != "offline"
-    if tutorial_is_active:
-        tutorial_tip_key = f"tutorial|{decision_cache_key(game)}"
-        st.warning("教程任务：先查看实时策略提示，再选择本轮行动。")
+active_mode = GAME_MODES.get(st.session_state.active_mode_key)
+active_mode_label = (
+    "示例对局"
+    if getattr(game, "tutorial_mode", False)
+    else (active_mode.label if active_mode else saved_mode.label)
+)
+st.markdown(
+    build_header_html(
+        mode_label=active_mode_label,
+        chips=game.human.chips,
+    ),
+    unsafe_allow_html=True,
+)
+
+with st.container(key="top_toolbar"):
+    toolbar_columns = st.columns([1.35, 1.1, 1.0, 1.0, 2.4], gap="small")
+    with toolbar_columns[0]:
         if st.button(
-            "实时策略提示",
-            key=f"strategy_tip_{tutorial_tip_key}",
+            "开始新对局",
+            key="top_open_match",
+            use_container_width=True,
         ):
-            st.session_state.strategy_tips[tutorial_tip_key] = (
-                tutorial_strategy_tip(game)
-            )
-        current_tip = st.session_state.strategy_tips.get(tutorial_tip_key)
-        if current_tip:
-            amount_text = (
-                f"，建议总额至 {current_tip['amount_to']}"
-                if current_tip["amount_to"] is not None
-                else ""
-            )
-            st.info(
-                f"建议：{current_tip['recommended_action']}{amount_text}\n\n"
-                f"依据：{current_tip['reason']}\n\n"
-                f"注意：{current_tip['risk']}"
-            )
-            st.caption("这是固定牌面的本地教学提示，不调用 DeepSeek，也不消耗 Token。")
-    elif coaching_is_online:
-        tip_key = decision_cache_key(game)
-        if st.button("实时策略提示", key=f"strategy_tip_{tip_key}"):
-            if tip_key not in st.session_state.strategy_tips:
-                try:
-                    with st.spinner("正在分析当前决策…"):
-                        st.session_state.strategy_tips[tip_key] = generate_realtime_tip(game)
-                except CoachError as error:
-                    st.error(f"实时策略提示暂不可用：{error}")
-        current_tip = st.session_state.strategy_tips.get(tip_key)
-        if current_tip:
-            probability_model = current_tip.get("probability_model", {})
-            probability_columns = st.columns(5)
-            probability_columns[0].metric(
-                "基础牌面胜率",
-                f"{probability_model.get('win_probability', 0):.1%}",
-            )
-            probability_columns[1].metric(
-                "结合行动参考胜率",
-                f"{probability_model.get('action_adjusted_win_probability', 0):.1%}",
-            )
-            probability_columns[2].metric(
-                "对手牌力更强概率",
-                f"{probability_model.get('opponent_stronger_probability', 0):.1%}",
-            )
-            probability_columns[3].metric(
-                "平局概率",
-                f"{probability_model.get('tie_probability', 0):.1%}",
-            )
-            probability_columns[4].metric(
-                "综合获胜机会",
-                f"{probability_model.get('average_pot_share', 0):.1%}",
-            )
-            action_confidence = probability_model.get(
-                "action_adjustment_confidence",
-                0,
-            )
-            confidence_label = (
-                "较高"
-                if action_confidence >= 0.45
-                else ("中等" if action_confidence >= 0.2 else "较低")
-            )
-            st.caption(
-                f"概率模型：{probability_model.get('samples', 0)} 次蒙特卡洛抽样。"
-                "基础胜率按剩余未知牌随机模拟；"
-                f"参考胜率结合本局 {probability_model.get('action_evidence_count', 0)} "
-                f"次对手公开行动温和调整，参考可信度为{confidence_label}，"
-                "不会读取真实手牌；"
-                "“综合获胜机会”表示重复相同局面时预计平均能分到的底池比例，"
-                "平局只计算你能分得的部分。联网 AI 会再结合对手公开行动进行判断。"
-            )
-            amount_text = (
-                f"，建议总额至 {current_tip['amount_to']}"
-                if current_tip["amount_to"] is not None
-                else ""
-            )
-            st.info(
-                f"建议：{current_tip['recommended_action']}{amount_text}\n\n"
-                f"依据：{current_tip['reason']}\n\n"
-                f"风险：{current_tip['risk']}"
-            )
-    else:
-        st.caption("线下对战不启用联网实时策略提示。")
-    to_call = game.amount_to_call(0)
-    if to_call == 0:
-        is_opening_bet = game.current_bet == 0
-        action_name = "bet" if is_opening_bet else "raise"
-        action_label = "下注（bet）" if is_opening_bet else "加注（raise）"
-        minimum = game.big_blind if is_opening_bet else game.minimum_raise_to
-        st.caption("你可以过牌（check），或继续下注施压。")
-    else:
-        action_name, action_label, minimum = "raise", "加注（raise）", game.minimum_raise_to
-        st.warning(f"当前需跟注（call）{to_call}。")
-    max_total = game.human.street_bet + game.human.chips
-    can_size_bet = max_total >= minimum
-    amount = st.number_input(f"{action_label}总额（to）", min_value=minimum, max_value=max(minimum, max_total), value=minimum, step=game.big_blind, disabled=not can_size_bet)
-    buttons = st.columns(4)
-    if buttons[0].button("弃牌（fold）", use_container_width=True):
-        game.human_action("fold")
-        st.rerun()
-    if to_call == 0:
-        if buttons[1].button("过牌（check）", use_container_width=True):
-            game.human_action("check")
+            launch_quick_match()
+    with toolbar_columns[1]:
+        if st.button(
+            "游戏设置",
+            key="top_open_settings",
+            use_container_width=True,
+        ):
+            st.session_state.rules_dialog_open = False
+            st.session_state.settings_dialog_open = True
             st.rerun()
-    elif game.human.chips >= to_call:
-        if buttons[1].button(f"跟注（call）至 {game.current_bet}", use_container_width=True):
-            game.human_action("call")
+    with toolbar_columns[2]:
+        if st.button(
+            "游戏规则",
+            key="top_open_rules",
+            use_container_width=True,
+        ):
+            st.session_state.settings_dialog_open = False
+            st.session_state.rules_dialog_open = True
             st.rerun()
-    else:
-        buttons[1].button("跟注不足，请全下", disabled=True, use_container_width=True)
-    if buttons[2].button(action_label, disabled=not can_size_bet, use_container_width=True):
-        game.human_action(action_name, int(amount))
-        st.rerun()
-    if buttons[3].button(
-        f"全下（all in）{game.human.chips}",
-        type="primary",
-        disabled=game.human.chips == 0,
-        use_container_width=True,
-    ):
-        game.human_action("all_in")
-        st.rerun()
+    with toolbar_columns[3]:
+        if st.button(
+            "示例对局",
+            key="top_tutorial",
+            use_container_width=True,
+        ):
+            launch_tutorial_match()
 
-if game.result and not board_reveal_pending:
-    if "你获胜" in game.result:
-        st.success(game.result)
-    else:
-        st.error(game.result)
-    if getattr(game, "skipped_to_result", False):
-        chip_change_text = "｜".join(
-            (
-                f"{player.name} "
-                f"{getattr(game, 'fast_forward_chip_changes', {}).get(index, 0):+d}"
-            )
-            for index, player in enumerate(game.players)
-        )
-        st.caption(f"本局筹码变化：{chip_change_text}")
-    if game.human.chips <= 0:
-        st.error("你已输光筹码，本场对战结束。")
-    eligible_for_next = (
-        game.human.chips > 0
-        and len([player for player in game.players if player.chips > 0]) >= 2
+with st.container(key="audio_controls"):
+    audio_manager.render_audio(
+        track_names=(
+            MATCH_BGM_TRACKS
+            if st.session_state.audio_match_playlist
+            else ("Experience",)
+        ),
+        cycle_tracks=st.session_state.audio_match_playlist,
+        playlist_id=st.session_state.audio_playlist_id,
+        volume=st.session_state.audio_volume_percent / 100,
+        muted=st.session_state.audio_muted,
     )
-    if getattr(game, "tutorial_mode", False):
-        st.success(
-            "示例对局已完成。现在请在侧边栏选择游戏模式、总人数和 AI 难度，"
-            "再点击“开始新对局”进入正式对战。"
-        )
-    else:
-        _, next_hand_column, _ = st.columns([1, 1.3, 1])
-        with next_hand_column:
-            with st.container(border=True):
-                st.markdown("#### 继续本场对战")
-                if st.button(
-                    "再来一局（next hand）",
-                    disabled=not eligible_for_next,
-                    use_container_width=True,
-                ):
-                    game.start_hand()
-                    st.session_state.shown_community_count = 0
-                    st.session_state.community_flip_from = None
-                    st.rerun()
-                if not eligible_for_next:
-                    if game.human.chips <= 0:
-                        st.caption(
-                            "你已输光筹码，可从侧边栏开始新对局。"
-                        )
-                    else:
-                        st.caption(
-                            "AI 对手已输光筹码，可从侧边栏开始新对局。"
-                        )
 
-if game.showdown_details and not board_reveal_pending:
-    st.subheader("所有玩家牌型（showdown hands）")
-    for detail in game.showdown_details:
-        st.info(detail)
+status_text = (
+    f"状态：{game.status}｜{game.street_name}｜"
+    f"庄家（dealer）：{dealer_name}｜底池（pot）：{game.pot}"
+)
+table_markup = build_table_html(
+    players=player_views,
+    pot=game.pot,
+    board_html=board_html,
+    board_is_empty=not game.community_cards and not board_reveal_pending,
+)
 
 session_records = completed_training_records(
     st.session_state.training_records
     + game.completed_hand_records
 )
-
-if game.result and not board_reveal_pending:
-    st.subheader("AI深度复盘")
-    if st.session_state.active_mode_key in {"offline", "tutorial"}:
-        st.caption("线下对战和示例对局不启用联网 AI 深度复盘。")
-    elif len(session_records) < MIN_DEEP_REVIEW_HANDS:
-        st.info(
-            f"当前已完成 {len(session_records)} 局；"
-            f"至少完成 {MIN_DEEP_REVIEW_HANDS} 局后，"
-            "才能进行有依据的累计深度复盘。"
-        )
-    else:
-        deep_review_key = review_cache_key(session_records)
-        if st.button("AI深度复盘", key=f"deep_review_{deep_review_key}"):
-            if deep_review_key not in st.session_state.deep_reviews:
-                try:
-                    with st.spinner(
-                        f"正在综合分析当前会话的 {len(session_records)} 局牌…"
-                    ):
-                        st.session_state.deep_reviews[deep_review_key] = (
-                            generate_deep_review(session_records)
-                        )
-                except CoachError as error:
-                    st.error(f"AI深度复盘暂不可用：{error}")
-        current_review = st.session_state.deep_reviews.get(deep_review_key)
-        if current_review:
-            st.caption(
-                f"分析范围：当前会话第 1 局至第 {len(session_records)} 局｜"
-                f"结论可信度：{current_review['confidence']}"
-            )
-            st.markdown(
-                f"**整体打法画像：** {current_review['summary']}"
-            )
-            st.markdown("**反复出现的优势：**")
-            for item in current_review["strengths"]:
-                st.write(f"- {item}")
-            st.markdown("**应优先改进的问题：**")
-            for item in current_review["improvements"]:
-                st.write(f"- {item}")
-            with st.expander("查看分析依据", expanded=False):
-                for item in current_review["evidence"]:
-                    st.write(f"- {item}")
-            st.markdown(
-                f"**接下来 3～5 局训练计划：** "
-                f"{current_review['next_focus']}"
-            )
-
-with st.expander("行动记录（action history）", expanded=False):
-    for entry in reversed(game.log):
-        st.write(f"- {entry}")
-
 training_summary = build_training_summary(session_records)
-# Streamlit 热更新可能保留旧模块对象；为旧会话补齐新版画像字段，避免页面崩溃。
 training_hands = training_summary.get("hands", 0)
 training_summary.setdefault(
     "profile_stage",
@@ -816,10 +741,7 @@ training_summary.setdefault(
     ),
 )
 training_summary.setdefault("profile_name", "等待更多数据")
-training_summary.setdefault(
-    "profile_progress",
-    min(training_hands / 8, 1.0),
-)
+training_summary.setdefault("profile_progress", min(training_hands / 8, 1.0))
 training_summary.setdefault(
     "profile_confidence",
     "中等" if training_hands >= 8 else "较低",
@@ -839,89 +761,514 @@ training_summary.setdefault(
         "showdown_rate": 0.0,
     },
 )
-training_summary.setdefault("training_focus", ["继续完成牌局以形成训练重点。"])
-with st.expander("数据面板", expanded=False):
-    metric_columns = st.columns(3)
-    metric_columns[0].metric("已完成牌局", training_summary["hands"])
-    metric_columns[1].metric("累计筹码变化", training_summary["chip_change"])
-    metric_columns[2].metric("玩家决策次数", training_summary["total_decisions"])
-    st.markdown(
-        f"#### {training_summary['profile_stage']}："
-        f"{training_summary['profile_name']}"
-    )
-    st.progress(training_summary["profile_progress"])
-    st.caption(
-        f"画像置信度：{training_summary['profile_confidence']}｜"
-        f"{training_summary['profile_basis']}"
-    )
-    behavior_metrics = training_summary["metrics"]
-    behavior_columns = st.columns(3)
-    behavior_columns[0].metric("主动参与翻前牌局", f"{behavior_metrics['vpip']:.0%}")
-    behavior_columns[1].metric(
-        "翻前主动加注",
-        f"{behavior_metrics['preflop_raise_rate']:.0%}",
-    )
-    behavior_columns[2].metric(
-        "受压弃牌率",
-        f"{behavior_metrics['fold_to_pressure_rate']:.0%}",
-    )
-    postflop_columns = st.columns(3)
-    postflop_columns[0].metric(
-        "翻后主动进攻率",
-        f"{behavior_metrics['postflop_aggression_rate']:.0%}",
-    )
-    postflop_columns[1].metric(
-        "全下牌局率",
-        f"{behavior_metrics['all_in_hand_rate']:.0%}",
-    )
-    postflop_columns[2].metric(
-        "摊牌率",
-        f"{behavior_metrics['showdown_rate']:.0%}",
-    )
-    st.write("行动统计")
-    st.write(
-        "｜".join(
-            f"{name} {count}"
-            for name, count in training_summary["action_counts"].items()
-        )
-    )
-    st.write("行为观察")
-    for observation in training_summary["observations"]:
-        st.write(f"- {observation}")
-    st.write("下一轮训练重点")
-    for focus in training_summary["training_focus"]:
-        st.write(f"- {focus}")
+training_summary.setdefault(
+    "training_focus",
+    ["继续完成牌局以形成训练重点。"],
+)
 
-if game.current_hand_record:
-    with st.expander(
-        "高级信息｜牌局决策记录",
-        expanded=False,
-    ):
+table_column, coach_column = st.columns([3.15, 1.18], gap="medium")
+
+with table_column:
+    st.markdown(
+        f'<div class="game-status-bar">{escape(status_text)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(table_markup, unsafe_allow_html=True)
+    if game.pots:
         st.caption(
-            "面向希望检查详细决策数据的玩家。记录用于还原每次决策时的"
-            "底池、跟注压力和公共牌，也是累计 AI 深度复盘的事实依据。"
+            "｜".join(
+                f"{'主池' if index == 0 else f'第 {index} 边池'}："
+                f"{pot.amount} 筹码"
+                for index, pot in enumerate(game.pots)
+            )
         )
-        human_only = st.checkbox(
-            "只看我的决策",
-            value=True,
-            key=f"human_record_only_{game.hand_number}",
-        )
-        record_rows = readable_action_rows(
-            record_for_display(game.current_hand_record),
-            human_only=human_only,
-        )
-        if record_rows:
-            st.dataframe(
-                record_rows,
-                hide_index=True,
+
+    if (
+        game.status == "进行中"
+        and game.human.folded
+        and not board_reveal_pending
+    ):
+        _, skip_column, _ = st.columns([1, 1.25, 1])
+        with skip_column:
+            if st.button(
+                "跳过",
+                type="primary",
                 use_container_width=True,
+            ):
+                try:
+                    if getattr(game, "tutorial_mode", False):
+                        game.fast_forward_after_human_fold(
+                            decision_provider=choose_tutorial_action
+                        )
+                    else:
+                        game.fast_forward_after_human_fold()
+                except (RuntimeError, ValueError) as error:
+                    st.error(f"暂时无法快速结算：{error}")
+                else:
+                    st.session_state.shown_community_count = len(
+                        game.community_cards
+                    )
+                    st.session_state.community_flip_from = 0
+                    st.rerun()
+
+    if (
+        game.status == "进行中"
+        and game.turn_is_human
+        and not board_reveal_pending
+    ):
+        with st.container(key="action_area"):
+            st.subheader("你的行动（your action）")
+            if getattr(game, "tutorial_mode", False):
+                st.warning("先查看实时策略提示，再选择本轮行动。")
+            to_call = game.amount_to_call(0)
+            if to_call == 0:
+                is_opening_bet = game.current_bet == 0
+                action_name = "bet" if is_opening_bet else "raise"
+                action_label = (
+                    "下注（bet）" if is_opening_bet else "加注（raise）"
+                )
+                minimum = (
+                    game.big_blind
+                    if is_opening_bet
+                    else game.minimum_raise_to
+                )
+            else:
+                action_name = "raise"
+                action_label = "加注（raise）"
+                minimum = game.minimum_raise_to
+                st.warning(f"当前需跟注（call）{to_call}。")
+
+            max_total = game.human.street_bet + game.human.chips
+            can_size_bet = max_total >= minimum
+            amount = minimum
+            if can_size_bet:
+                amount = st.slider(
+                    f"{action_label}总额（to）",
+                    min_value=minimum,
+                    max_value=max_total,
+                    value=minimum,
+                    step=game.big_blind,
+                )
+            buttons = st.columns(4)
+            with buttons[0]:
+                with st.container(key="fold_action"):
+                    fold_clicked = st.button(
+                        "弃牌（fold）",
+                        key="fold_action_button",
+                        use_container_width=True,
+                    )
+            if fold_clicked:
+                game.human_action("fold")
+                st.session_state.strategy_panel_open = False
+                st.rerun()
+            if to_call == 0:
+                with buttons[1]:
+                    with st.container(key="call_action"):
+                        call_clicked = st.button(
+                            "过牌（check）",
+                            key="call_action_button",
+                            use_container_width=True,
+                        )
+                if call_clicked:
+                    game.human_action("check")
+                    st.session_state.strategy_panel_open = False
+                    st.rerun()
+            elif game.human.chips >= to_call:
+                with buttons[1]:
+                    with st.container(key="call_action"):
+                        call_clicked = st.button(
+                            f"跟注（call）至 {game.current_bet}",
+                            key="call_action_button",
+                            use_container_width=True,
+                        )
+                if call_clicked:
+                    game.human_action("call")
+                    st.session_state.strategy_panel_open = False
+                    st.rerun()
+            else:
+                with buttons[1]:
+                    with st.container(key="call_action"):
+                        st.button(
+                            "跟注不足，请全下",
+                            key="call_action_button",
+                            disabled=True,
+                            use_container_width=True,
+                        )
+            with buttons[2]:
+                with st.container(key="raise_action"):
+                    raise_clicked = st.button(
+                        action_label,
+                        key="raise_action_button",
+                        disabled=not can_size_bet,
+                        use_container_width=True,
+                    )
+            if raise_clicked:
+                game.human_action(action_name, int(amount))
+                st.session_state.strategy_panel_open = False
+                st.rerun()
+            with buttons[3]:
+                with st.container(key="all_in_action"):
+                    all_in_clicked = st.button(
+                        f"全下（all in）{game.human.chips}",
+                        key="all_in_action_button",
+                        type="primary",
+                        disabled=game.human.chips == 0,
+                        use_container_width=True,
+                    )
+            if all_in_clicked:
+                game.human_action("all_in")
+                st.session_state.strategy_panel_open = False
+                st.rerun()
+
+    if game.result and not board_reveal_pending:
+        with st.container(key="result_area"):
+            if "你获胜" in game.result:
+                st.success(game.result)
+            else:
+                st.error(game.result)
+            if getattr(game, "skipped_to_result", False):
+                chip_change_text = "｜".join(
+                    (
+                        f"{player.name} "
+                        f"{getattr(game, 'fast_forward_chip_changes', {}).get(index, 0):+d}"
+                    )
+                    for index, player in enumerate(game.players)
+                )
+                st.caption(f"本局筹码变化：{chip_change_text}")
+            if game.human.chips <= 0:
+                st.error("请开始新对局")
+
+            eligible_for_next = (
+                game.human.chips > 0
+                and len(
+                    [
+                        player
+                        for player in game.players
+                        if player.chips > 0
+                    ]
+                )
+                >= 2
             )
-        else:
-            st.info("本局还没有可展示的玩家决策。")
-        if game.current_hand_record.get("result"):
-            st.caption(
-                f"本局结果：{game.current_hand_record['result']}"
+            if getattr(game, "tutorial_mode", False):
+                st.success(
+                    "示例对局已完成。现在请在侧边栏选择游戏模式、"
+                    "总人数和 AI 难度，再点击“开始新对局”进入正式对战。"
+                )
+            else:
+                st.markdown("#### 继续本场对战")
+                if st.button(
+                    "再来一局",
+                    disabled=not eligible_for_next,
+                    use_container_width=True,
+                ):
+                    game.start_hand()
+                    begin_hole_deal_animation()
+                    st.session_state.strategy_panel_open = False
+                    st.session_state.shown_community_count = 0
+                    st.session_state.community_flip_from = None
+                    st.rerun()
+                if not eligible_for_next:
+                    if game.human.chips <= 0:
+                        st.caption("请开始新对局")
+                    else:
+                        st.caption(
+                            "AI 对手已输光筹码，可从侧边栏开始新对局。"
+                        )
+
+with coach_column:
+    with st.container(key="coach_panel"):
+        st.markdown(
+            '<div class="cyber-panel-title">实时策略提示</div>',
+            unsafe_allow_html=True,
+        )
+        if getattr(game, "tutorial_mode", False):
+            st.info(
+                "示例对局：你固定持有 A♠、K♠。轮到你时先点击"
+                "“实时策略提示”，再根据提示完成翻牌前、翻牌圈、"
+                "转牌圈和河牌圈；教程对手只会跟注或过牌。"
             )
+
+        current_tip = None
+        current_tip_is_tutorial = getattr(game, "tutorial_mode", False)
+        can_request_tip = (
+            game.status == "进行中"
+            and game.turn_is_human
+            and not board_reveal_pending
+        )
+        if can_request_tip and current_tip_is_tutorial:
+            tutorial_tip_key = f"tutorial|{decision_cache_key(game)}"
+            if st.button(
+                "实时策略提示",
+                key=f"strategy_tip_{tutorial_tip_key}",
+                use_container_width=True,
+            ):
+                st.session_state.strategy_panel_open = True
+                st.session_state.strategy_tips[tutorial_tip_key] = (
+                    tutorial_strategy_tip(game)
+                )
+            current_tip = st.session_state.strategy_tips.get(
+                tutorial_tip_key
+            )
+        elif (
+            can_request_tip
+            and st.session_state.active_mode_key != "offline"
+        ):
+            tip_key = decision_cache_key(game)
+            if st.button(
+                "实时策略提示",
+                key=f"strategy_tip_{tip_key}",
+                use_container_width=True,
+            ):
+                st.session_state.strategy_panel_open = True
+                if tip_key not in st.session_state.strategy_tips:
+                    try:
+                        with st.spinner("正在分析当前决策…"):
+                            st.session_state.strategy_tips[tip_key] = (
+                                generate_realtime_tip(game)
+                            )
+                    except CoachError as error:
+                        st.error(f"实时策略提示暂不可用：{error}")
+            current_tip = st.session_state.strategy_tips.get(tip_key)
+
+        if current_tip and st.session_state.strategy_panel_open:
+            probability_model = current_tip.get("probability_model", {})
+            if probability_model:
+                probability_items = (
+                    (
+                        "基础牌面胜率",
+                        probability_model.get("win_probability", 0),
+                    ),
+                    (
+                        "结合行动参考胜率",
+                        probability_model.get(
+                            "action_adjusted_win_probability",
+                            0,
+                        ),
+                    ),
+                    (
+                        "对手牌力更强概率",
+                        probability_model.get(
+                            "opponent_stronger_probability",
+                            0,
+                        ),
+                    ),
+                    (
+                        "平局概率",
+                        probability_model.get("tie_probability", 0),
+                    ),
+                    (
+                        "综合获胜机会",
+                        probability_model.get("average_pot_share", 0),
+                    ),
+                )
+                for item_index in range(0, len(probability_items), 2):
+                    probability_columns = st.columns(2)
+                    for column, item in zip(
+                        probability_columns,
+                        probability_items[item_index:item_index + 2],
+                    ):
+                        column.metric(item[0], f"{item[1]:.1%}")
+
+            amount_text = (
+                f"至 {current_tip['amount_to']}"
+                if current_tip["amount_to"] is not None
+                else ""
+            )
+            risk_label = "注意" if current_tip_is_tutorial else "风险"
+            st.markdown(
+                f"""
+<div class="strategy-block">
+  <div class="strategy-label">建议</div>
+  <div class="strategy-action">{escape(current_tip['recommended_action'])} {escape(amount_text)}</div>
+  <div class="strategy-label">依据</div>
+  <div class="strategy-copy">{escape(current_tip['reason'])}</div>
+  <div class="strategy-copy risk"><span class="strategy-label">{risk_label}</span><br>{escape(current_tip['risk'])}</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+        with st.expander("AI深度复盘", expanded=False):
+            if st.session_state.active_mode_key in {
+                "offline",
+                "tutorial",
+            }:
+                st.caption("线下对战和示例对局不启用联网 AI 深度复盘。")
+            elif len(session_records) < MIN_DEEP_REVIEW_HANDS:
+                st.info(
+                    f"当前已完成 {len(session_records)} 局；"
+                    f"至少完成 {MIN_DEEP_REVIEW_HANDS} 局后，"
+                    "才能进行有依据的累计深度复盘。"
+                )
+            elif game.result and not board_reveal_pending:
+                    deep_review_key = review_cache_key(session_records)
+                    if st.button(
+                        "AI深度复盘",
+                        key=f"deep_review_{deep_review_key}",
+                        use_container_width=True,
+                    ):
+                        if (
+                            deep_review_key
+                            not in st.session_state.deep_reviews
+                        ):
+                            try:
+                                with st.spinner(
+                                    "正在综合分析当前会话的 "
+                                    f"{len(session_records)} 局牌…"
+                                ):
+                                    st.session_state.deep_reviews[
+                                        deep_review_key
+                                    ] = generate_deep_review(
+                                        session_records
+                                    )
+                            except CoachError as error:
+                                st.error(
+                                    f"AI深度复盘暂不可用：{error}"
+                                )
+                    current_review = st.session_state.deep_reviews.get(
+                        deep_review_key
+                    )
+                    if current_review:
+                        st.caption(
+                            "分析范围：当前会话第 1 局至第 "
+                            f"{len(session_records)} 局｜"
+                            "结论可信度："
+                            f"{current_review['confidence']}"
+                        )
+                        st.markdown(
+                            "**整体打法画像：** "
+                            f"{current_review['summary']}"
+                        )
+                        st.markdown("**反复出现的优势：**")
+                        for item in current_review["strengths"]:
+                            st.write(f"- {item}")
+                        st.markdown("**应优先改进的问题：**")
+                        for item in current_review["improvements"]:
+                            st.write(f"- {item}")
+                        st.markdown("**查看分析依据**")
+                        for item in current_review["evidence"]:
+                            st.write(f"- {item}")
+                        st.markdown(
+                            "**接下来 3～5 局训练计划：** "
+                            f"{current_review['next_focus']}"
+                        )
+
+        with st.container(key="data_panel_area"):
+            with st.expander("数据面板", expanded=False):
+                metric_columns = st.columns(3)
+                metric_columns[0].metric(
+                    "已完成牌局",
+                    training_summary["hands"],
+                )
+                metric_columns[1].metric(
+                    "累计筹码变化",
+                    training_summary["chip_change"],
+                )
+                metric_columns[2].metric(
+                    "玩家决策次数",
+                    training_summary["total_decisions"],
+                )
+                st.markdown(
+                    f"#### {training_summary['profile_stage']}："
+                    f"{training_summary['profile_name']}"
+                )
+                st.progress(training_summary["profile_progress"])
+                st.caption(
+                    "画像置信度："
+                    f"{training_summary['profile_confidence']}｜"
+                    f"{training_summary['profile_basis']}"
+                )
+                behavior_metrics = training_summary["metrics"]
+                behavior_columns = st.columns(2)
+                behavior_columns[0].metric(
+                    "主动参与翻前牌局",
+                    f"{behavior_metrics['vpip']:.0%}",
+                )
+                behavior_columns[1].metric(
+                    "翻前主动加注",
+                    f"{behavior_metrics['preflop_raise_rate']:.0%}",
+                )
+                behavior_columns = st.columns(2)
+                behavior_columns[0].metric(
+                    "受压弃牌率",
+                    f"{behavior_metrics['fold_to_pressure_rate']:.0%}",
+                )
+                behavior_columns[1].metric(
+                    "翻后主动进攻率",
+                    f"{behavior_metrics['postflop_aggression_rate']:.0%}",
+                )
+                behavior_columns = st.columns(2)
+                behavior_columns[0].metric(
+                    "全下牌局率",
+                    f"{behavior_metrics['all_in_hand_rate']:.0%}",
+                )
+                behavior_columns[1].metric(
+                    "摊牌率",
+                    f"{behavior_metrics['showdown_rate']:.0%}",
+                )
+                st.write("行动统计")
+                st.write(
+                    "｜".join(
+                        f"{name} {count}"
+                        for name, count in training_summary[
+                            "action_counts"
+                        ].items()
+                    )
+                )
+                st.write("行为观察")
+                for observation in training_summary["observations"]:
+                    st.write(f"- {observation}")
+                st.write("下一轮训练重点")
+                for focus in training_summary["training_focus"]:
+                    st.write(f"- {focus}")
+
+        with st.expander(
+            "行动记录",
+            expanded=False,
+        ):
+            for entry in reversed(game.log):
+                st.write(f"- {entry}")
+
+        if game.current_hand_record:
+            with st.expander(
+                "高级信息｜牌局决策记录",
+                expanded=False,
+            ):
+                st.caption(
+                    "面向希望检查详细决策数据的玩家。记录用于还原"
+                    "每次决策时的底池、跟注压力和公共牌，也是累计 "
+                    "AI 深度复盘的事实依据。"
+                )
+                human_only = st.checkbox(
+                    "只看我的决策",
+                    value=True,
+                    key=f"human_record_only_{game.hand_number}",
+                )
+                record_rows = readable_action_rows(
+                    record_for_display(game.current_hand_record),
+                    human_only=human_only,
+                )
+                if record_rows:
+                    st.dataframe(
+                        record_rows,
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("本局还没有可展示的玩家决策。")
+                if game.current_hand_record.get("result"):
+                    st.caption(
+                        "本局结果："
+                        f"{game.current_hand_record['result']}"
+                    )
+
+with coach_column:
+    if game.showdown_details and not board_reveal_pending:
+        with st.container(key="showdown_area"):
+            st.subheader("所有玩家牌型")
+            for detail in game.showdown_details:
+                st.info(detail)
+
 
 def schedule_flow_transition(kind, key, delay_seconds):
     """记录截止时间后立即结束本轮渲染，避免 sleep 让整页控件变灰。"""

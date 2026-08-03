@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from poker.hand import HAND_NAMES, best_hand, describe_score
+
 
 def authoritative_public_facts(game, player_index: int) -> dict:
     """由本地规则生成，不让 LLM 自行猜测花色或盲注含义。"""
@@ -15,6 +17,15 @@ def authoritative_public_facts(game, player_index: int) -> dict:
         len(hole_cards) == 2
         and hole_cards[0].rank == hole_cards[1].rank
     )
+    available_cards = list(hole_cards) + list(game.community_cards)
+    current_best_hand = None
+    current_hand_category = None
+    current_hand_score = None
+    if len(available_cards) >= 5:
+        score, _ = best_hand(available_cards)
+        current_best_hand = describe_score(score)
+        current_hand_category = HAND_NAMES[score[0]].split("（", 1)[0]
+        current_hand_score = list(score)
     voluntary_actions = list(
         game.current_hand_record.get("actions", [])
     )
@@ -34,6 +45,13 @@ def authoritative_public_facts(game, player_index: int) -> dict:
         "your_hole_cards": [str(card) for card in hole_cards],
         "your_two_cards_same_suit": same_suit,
         "your_two_cards_are_pair": paired,
+        "your_current_best_hand": current_best_hand,
+        "your_current_hand_category": current_hand_category,
+        "your_current_hand_score": current_hand_score,
+        "current_hand_rule": (
+            "当前最佳牌型由本地德州扑克牌型引擎从你的两张手牌和已发公共牌中精确计算；"
+            "不得把未成对的单张起手牌当作对子。"
+        ),
         "blind_posts": {
             "small_blind_seat": game.small_blind_index,
             "small_blind_amount": game.small_blind,

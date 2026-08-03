@@ -27,6 +27,24 @@ def test_dealer_rotates_for_four_player_table():
     assert game.dealer_index == 1
 
 
+def test_four_player_betting_order_starts_after_big_blind_then_dealer_left():
+    game = PokerGame(total_players=4)
+    game.start_hand()
+
+    assert game.dealer_index == 0
+    assert game.small_blind_index == 1
+    assert game.big_blind_index == 2
+    assert game.turn_index == 3
+
+    for index in (3, 0, 1):
+        game._apply_action(index, "call")
+    game._apply_action(2, "check")
+    game.continue_after_action()
+
+    assert game.street_index == 0
+    assert game.turn_index == 1
+
+
 def test_multiple_all_ins_create_main_and_side_pot():
     game = PokerGame(total_players=3)
     contributions = [100, 200, 200]
@@ -209,6 +227,9 @@ def test_busted_ai_is_marked_out_after_hand():
     game.status = "已结束"
     assert game.is_out(1)
 
+    game.start_hand()
+    assert not game.players[1].hole_cards
+
 
 def test_last_action_remains_visible_until_street_transition_continues():
     game = PokerGame(total_players=2)
@@ -244,7 +265,7 @@ def test_folded_ai_hand_is_never_in_showdown_details():
     game.players[1].folded = True
     game._build_showdown_details()
     folded_detail = next(detail for detail in game.showdown_details if game.players[1].name in detail)
-    assert "手牌未公开" in folded_detail
+    assert folded_detail.endswith("｜已弃牌")
     assert str(game.players[1].hole_cards[0]) not in folded_detail
 
 

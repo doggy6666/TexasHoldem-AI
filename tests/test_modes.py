@@ -30,14 +30,14 @@ def test_advanced_mode_contains_both_internal_styles_at_multi_ai_table():
     assert len(personas) == 3
     assert ADVANCED_CONSERVATIVE in personas
     assert ADVANCED_AGGRESSIVE in personas
-    assert {public_label_for_persona(persona) for persona in personas} == {"进阶 AI"}
+    assert {public_label_for_persona(persona) for persona in personas} == {"进阶"}
 
 
 def test_custom_mode_assigns_each_seat_and_hides_internal_advanced_style():
     personas = personas_for_mode(
         "custom",
         3,
-        custom_labels=["新手 AI", "进阶 AI", "高手 AI"],
+        custom_labels=["菜鸟", "进阶", "高手"],
         rng=random.Random(3),
     )
 
@@ -45,12 +45,12 @@ def test_custom_mode_assigns_each_seat_and_hides_internal_advanced_style():
     assert personas[1] in {ADVANCED_CONSERVATIVE, ADVANCED_AGGRESSIVE}
     assert personas[2] == EXPERT
     assert [public_label_for_persona(persona) for persona in personas] == [
-        "新手 AI",
-        "进阶 AI",
-        "高手 AI",
+        "菜鸟",
+        "进阶",
+        "高手",
     ]
 
 
 def test_custom_mode_requires_one_choice_per_ai_seat():
     with pytest.raises(ValueError):
-        personas_for_mode("custom", 2, custom_labels=["新手 AI"])
+        personas_for_mode("custom", 2, custom_labels=["菜鸟"])

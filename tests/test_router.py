@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from agent.modes import (
@@ -7,7 +9,10 @@ from agent.modes import (
     NOVICE,
     OFFLINE,
 )
-from agent.router import choose_persona_decision
+from agent.router import (
+    AI_DECISION_TIMEOUT_SECONDS,
+    choose_persona_decision,
+)
 from poker.game import PokerGame
 
 
@@ -69,3 +74,36 @@ def test_router_uses_default_ai_for_unknown_persona(monkeypatch):
         0,
         "默认 AI 已接管",
     )
+
+
+def test_online_ai_has_five_second_production_timeout():
+    assert AI_DECISION_TIMEOUT_SECONDS == 5.0
+
+
+def test_online_ai_timeout_uses_default_ai(monkeypatch):
+    game = PokerGame(total_players=2)
+    game.players[1].ai_persona = EXPERT
+
+    def slow_expert(current_game, index):
+        time.sleep(0.2)
+        return "raise", 100, "高手 AI"
+
+    monkeypatch.setattr(
+        "agent.router.AI_DECISION_TIMEOUT_SECONDS",
+        0.03,
+    )
+    monkeypatch.setattr(
+        "agent.router.choose_expert_decision",
+        slow_expert,
+    )
+    monkeypatch.setattr(
+        "agent.router.choose_fallback_action",
+        lambda current_game, index: ("check", 0),
+    )
+
+    started_at = time.monotonic()
+    result = choose_persona_decision(game, 1)
+    elapsed = time.monotonic() - started_at
+
+    assert result == ("check", 0, "默认 AI 已接管")
+    assert elapsed < 0.15

@@ -15,11 +15,11 @@ class GameMode:
 
 
 GAME_MODES = {
-    "offline": GameMode("offline", "线下对战", "默认 AI", True),
-    "simple": GameMode("simple", "简单模式", "新手 AI", True),
-    "advanced": GameMode("advanced", "进阶模式", "进阶 AI", True),
-    "hard": GameMode("hard", "困难模式", "高手 AI", True),
-    "custom": GameMode("custom", "自定义模式", "自定义 AI", True),
+    "offline": GameMode("offline", "线下对战", "默认", True),
+    "simple": GameMode("simple", "简单模式", "菜鸟", True),
+    "advanced": GameMode("advanced", "进阶模式", "进阶", True),
+    "hard": GameMode("hard", "困难模式", "高手", True),
+    "custom": GameMode("custom", "自定义模式", "自定义", True),
 }
 
 OFFLINE = "offline"
@@ -29,11 +29,11 @@ ADVANCED_AGGRESSIVE = "advanced_aggressive"
 EXPERT = "expert"
 
 PERSONA_LABELS = {
-    OFFLINE: "默认 AI",
-    NOVICE: "新手 AI",
-    ADVANCED_CONSERVATIVE: "进阶 AI",
-    ADVANCED_AGGRESSIVE: "进阶 AI",
-    EXPERT: "高手 AI",
+    OFFLINE: "默认",
+    NOVICE: "菜鸟",
+    ADVANCED_CONSERVATIVE: "进阶",
+    ADVANCED_AGGRESSIVE: "进阶",
+    EXPERT: "高手",
 }
 
 
@@ -45,7 +45,7 @@ def mode_from_label(label: str) -> GameMode:
 
 
 def public_label_for_persona(persona: str) -> str:
-    return PERSONA_LABELS.get(persona, "默认 AI")
+    return PERSONA_LABELS.get(persona, "默认")
 
 
 def personas_for_mode(
@@ -78,13 +78,16 @@ def personas_for_mode(
         labels = custom_labels or []
         if len(labels) != ai_count:
             raise ValueError("自定义模式必须为每个 AI 座位选择难度。")
+        # 旧标签作为输入别名保留，避免热更新前的会话状态失效；页面只展示新名称。
         label_to_persona = {
+            "菜鸟": NOVICE,
+            "高手": EXPERT,
             "新手 AI": NOVICE,
             "高手 AI": EXPERT,
         }
         personas = []
         for label in labels:
-            if label == "进阶 AI":
+            if label in {"进阶", "进阶 AI"}:
                 personas.append(
                     random_source.choice(
                         [ADVANCED_CONSERVATIVE, ADVANCED_AGGRESSIVE]

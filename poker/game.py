@@ -430,7 +430,7 @@ class PokerGame:
             if not player.hole_cards:
                 continue
             if player.folded:
-                details.append(f"{player.name}｜已弃牌，手牌未公开")
+                details.append(f"{player.name}｜已弃牌")
                 continue
             if self.ended_without_showdown:
                 details.append(

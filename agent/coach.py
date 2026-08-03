@@ -25,6 +25,9 @@ TIP_SYSTEM_PROMPT = """你是德州扑克实时策略教练。
 行动进行有限幅度的加权，两者都不等于读取了对手真实手牌。
 authoritative_facts 是本地程序已经确认的事实，必须严格遵守：
 - your_two_cards_same_suit 表示两张起手牌是否同一花色；
+- your_current_best_hand 与 your_current_hand_category 是本地牌型引擎根据当前
+  已发牌精确计算的牌型。描述玩家当前已有牌型时必须严格服从这些字段，不能把
+  单张 A、K 等踢脚牌误当成对子；
 - blind_posts 中的小盲和大盲只是强制投入，绝不是下注或加注；
 - 只有 opponent_voluntary_aggressive_actions 中记录的行动才能称为对手主动下注、
   加注或全下。不要根据 street_bet 或 hand_contribution 自行推断有人加注。
@@ -94,6 +97,20 @@ COACHING_TERM_REPLACEMENTS = (
     (r"\bblockers?\b", "会减少对手强牌可能性的关键牌"),
     (r"\bc-?bet\b", "翻牌后的持续下注"),
     (r"\bvariance\b", "短期结果波动"),
+)
+
+_PLAYER_HAND_CATEGORY_CLAIM = re.compile(
+    r"(?:"
+    r"你的(?:当前)?(?:最佳)?(?:手牌|牌型|牌)"
+    r"|你(?:目前|现在)?"
+    r"|当前(?:的)?(?:最佳)?(?:牌型|成牌)"
+    r"|目前(?:的)?(?:最佳)?(?:牌型|成牌)"
+    r")"
+    r".{0,8}?"
+    r"(?:已经|已)?(?:是|为|有|拿到|组成|形成|属于|只有)"
+    r".{0,6}?"
+    r"(皇家同花顺|同花顺|四条|葫芦|同花|顺子|三条|两对|双对|一对|高牌)",
+    flags=re.IGNORECASE,
 )
 
 
@@ -326,6 +343,30 @@ def _tip_fact_errors(result: dict, payload: dict) -> list[str]:
         )
     ):
         errors.append("本局尚无对手主动下注、加注或全下")
+
+    actual_category = str(
+        facts.get("your_current_hand_category") or ""
+    ).strip()
+    if actual_category:
+        for match in _PLAYER_HAND_CATEGORY_CLAIM.finditer(text):
+            if re.search(
+                r"可能|机会|有望|如果|假如|若能|可以|能够",
+                match.group(0),
+            ):
+                continue
+            claimed_category = match.group(1)
+            if claimed_category == "双对":
+                claimed_category = "两对"
+            if claimed_category == actual_category:
+                continue
+            exact_hand = str(
+                facts.get("your_current_best_hand")
+                or actual_category
+            )
+            errors.append(
+                f"本地牌型引擎确认玩家当前最佳牌型为{exact_hand}，"
+                f"不能描述为{claimed_category}"
+            )
 
     return list(dict.fromkeys(errors))
 

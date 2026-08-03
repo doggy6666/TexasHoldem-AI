@@ -18,7 +18,7 @@ class DeepSeekClient:
     api_key: str
     base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-v4-flash"
-    timeout_seconds: float = 8.0
+    timeout_seconds: float = 5.0
 
     @classmethod
     def from_environment(cls) -> "DeepSeekClient":

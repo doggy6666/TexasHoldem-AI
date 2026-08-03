@@ -4,15 +4,29 @@ import time
 from streamlit.testing.v1 import AppTest
 
 
+def enter_with_nickname(app, nickname="测试玩家"):
+    app.text_input[0].set_value(nickname).run(timeout=15)
+    next(
+        button for button in app.button if button.label == "进入牌局"
+    ).click().run(timeout=15)
+
+
 def test_app_starts_with_rules_and_tutorial_entry():
     # 先缓存依赖模块，再执行 app，覆盖 Streamlit 热更新时的导入方式。
     import poker.tutorial  # noqa: F401
 
     app_path = Path(__file__).parents[1] / "app.py"
     app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
 
     assert not app.exception
-    assert any(expander.label == "游戏规则" for expander in app.expander)
+    rules_button = next(
+        button for button in app.button if button.label == "游戏规则"
+    )
+    rules_button.click().run(timeout=15)
+    assert not app.exception
+    assert any("游戏目标" in markdown.value for markdown in app.markdown)
+    assert not app.session_state.rules_dialog_open
     tutorial_button = next(
         button for button in app.button if button.label == "示例对局"
     )
@@ -33,13 +47,56 @@ def test_app_starts_with_rules_and_tutorial_entry():
     assert app.session_state.game.turn_index == 0
 
 
+def test_top_start_button_quick_starts_without_opening_settings():
+    app_path = Path(__file__).parents[1] / "app.py"
+    app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
+
+    next(
+        button
+        for button in app.button
+        if button.label == "开始新对局"
+        and button.key == "top_open_match"
+    ).click().run(timeout=15)
+
+    assert not app.exception
+    assert app.session_state.game.status == "进行中"
+    assert app.session_state.game.total_players == 2
+    assert not app.session_state.settings_dialog_open
+    assert app.session_state.audio_match_playlist is True
+    assert app.session_state.audio_playlist_id
+    table_markup = next(
+        markdown.value
+        for markdown in app.markdown
+        if 'class="table-stage ' in markdown.value
+    )
+    assert "测试玩家" in table_markup
+
+
+def test_deep_review_explains_when_fewer_than_five_hands_are_completed():
+    app_path = Path(__file__).parents[1] / "app.py"
+    app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
+
+    assert any(
+        "至少完成 5 局后" in info.value
+        for info in app.info
+    )
+
+
 def test_custom_random_ai_assigns_current_seats_and_hides_style_labels(
     monkeypatch,
 ):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     app_path = Path(__file__).parents[1] / "app.py"
     app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
 
+    [
+        button
+        for button in app.button
+        if button.label == "游戏设置"
+    ][-1].click().run(timeout=15)
     mode_radio = next(
         radio for radio in app.radio if radio.label == "游戏模式"
     )
@@ -51,7 +108,7 @@ def test_custom_random_ai_assigns_current_seats_and_hides_style_labels(
     )
     player_count.set_value(4).run(timeout=15)
     button_labels = [button.label for button in app.button]
-    assert button_labels.index("开始新对局（new match）") < (
+    assert button_labels.index("开始新对局") < (
         button_labels.index("以随机 AI 开始新对局")
     )
     random_button = next(
@@ -75,24 +132,24 @@ def test_custom_random_ai_assigns_current_seats_and_hides_style_labels(
         "advanced_aggressive",
         "expert",
     }
-    visible_ai_settings = [
-        selectbox.label
-        for selectbox in app.selectbox
-        if selectbox.label.startswith("AI 座位")
-    ]
-    assert visible_ai_settings == []
-    seat_markup = [
+    table_markup = next(
         markdown.value
         for markdown in app.markdown
-        if 'class="player-seat"' in markdown.value
-    ]
-    assert len(seat_markup) == 4
-    assert all('class="ai-level"' not in markup for markup in seat_markup)
+        if 'class="table-stage ' in markdown.value
+    )
+    assert table_markup.count('class="player-seat ') == 4
+    assert 'class="ai-level"' not in table_markup
 
 
 def test_manual_custom_start_keeps_selected_style_visible():
     app_path = Path(__file__).parents[1] / "app.py"
     app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
+    [
+        button
+        for button in app.button
+        if button.label == "游戏设置"
+    ][-1].click().run(timeout=15)
     next(
         radio for radio in app.radio if radio.label == "游戏模式"
     ).set_value("自定义模式").run(timeout=15)
@@ -101,20 +158,58 @@ def test_manual_custom_start_keeps_selected_style_visible():
         for selectbox in app.selectbox
         if selectbox.label == "AI 座位 1"
     )
-    seat_selectbox.set_value("高手 AI").run(timeout=15)
-    next(
+    seat_selectbox.set_value("高手").run(timeout=15)
+    [
         button
         for button in app.button
-        if button.label == "开始新对局（new match）"
-    ).click().run(timeout=15)
+        if button.label == "开始新对局"
+    ][-1].click().run(timeout=15)
 
     assert not app.exception
     assert not app.session_state.custom_ai_randomized
     assert app.session_state.custom_ai_randomized_count is None
     assert not app.session_state.hide_active_ai_styles
-    seat_markup = [
+    table_markup = next(
         markdown.value
         for markdown in app.markdown
-        if 'class="player-seat"' in markdown.value
-    ]
-    assert any('class="ai-level"' in markup for markup in seat_markup)
+        if 'class="table-stage ' in markdown.value
+    )
+    assert 'class="ai-level"' in table_markup
+    assert ">高手<" in table_markup
+
+
+def test_settings_are_saved_when_started_from_the_dialog():
+    app_path = Path(__file__).parents[1] / "app.py"
+    app = AppTest.from_file(str(app_path)).run(timeout=15)
+    enter_with_nickname(app)
+
+    [
+        button
+        for button in app.button
+        if button.label == "游戏设置"
+    ][-1].click().run(timeout=15)
+    next(
+        radio for radio in app.radio if radio.label == "游戏模式"
+    ).set_value("自定义模式").run(timeout=15)
+    next(
+        selectbox
+        for selectbox in app.selectbox
+        if selectbox.label == "总人数（players）"
+    ).set_value(4).run(timeout=15)
+    next(
+        selectbox
+        for selectbox in app.selectbox
+        if selectbox.label == "AI 座位 1"
+    ).set_value("高手").run(timeout=15)
+    [
+        button
+        for button in app.button
+        if button.label == "开始新对局"
+    ][-1].click().run(timeout=15)
+
+    assert app.session_state.match_settings["mode_key"] == "custom"
+    assert app.session_state.match_settings["player_count"] == 4
+    assert app.session_state.match_settings["custom_labels"][1] == "高手"
+    assert not app.session_state.settings_dialog_open
+    assert app.session_state.game.total_players == 4
+    assert app.session_state.game.players[1].ai_persona == "expert"

@@ -190,6 +190,47 @@ def test_realtime_tip_blocks_repeated_factual_error():
     assert len(client.calls) == 2
 
 
+def test_realtime_tip_repairs_wrong_current_hand_category():
+    game = PokerGame(total_players=2)
+    game.start_hand()
+    game.human.hole_cards = [Card(9, "♠"), Card(14, "♥")]
+    game.community_cards = [
+        Card(10, "♥"),
+        Card(13, "♥"),
+        Card(8, "♦"),
+        Card(9, "♦"),
+        Card(5, "♠"),
+    ]
+    client = SequenceFakeClient(
+        [
+            {
+                "action": "call",
+                "amount_to": None,
+                "reason": "你的牌是两对（9和A），可以跟注。",
+                "risk": "对手仍可能持有更强牌。",
+            },
+            {
+                "action": "call",
+                "amount_to": None,
+                "reason": "你目前是一对9，A只是未成对的高张。",
+                "risk": "对手仍可能持有更强牌。",
+            },
+        ]
+    )
+
+    payload = build_tip_payload(game, probability_samples=20)
+    facts = payload["authoritative_facts"]
+    tip = generate_realtime_tip(game, client=client)
+
+    assert facts["your_current_best_hand"] == "一对 9"
+    assert facts["your_current_hand_category"] == "一对"
+    assert facts["your_current_hand_score"][:2] == [1, 9]
+    assert len(client.calls) == 2
+    assert "一对9" in tip["reason"]
+    assert "两对" not in tip["reason"]
+    assert "本地牌型引擎确认" in client.calls[1][1]
+
+
 def test_tip_cache_key_changes_after_player_decision():
     game = PokerGame(total_players=2)
     game.start_hand()
