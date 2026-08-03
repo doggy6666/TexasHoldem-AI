@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import streamlit.components.v1 as components
 
 
-AUDIO_DIR = Path(__file__).parent / "assets" / "audio"
-AUDIO_SEARCH_DIRS = (AUDIO_DIR, Path(__file__).parent)
+STATIC_AUDIO_DIR = Path(__file__).parent / "static" / "audio"
+AUDIO_SEARCH_DIRS = (STATIC_AUDIO_DIR,)
 BGM_TRACKS = {
     "Experience": "Ludovico Einaudi - Experience.mp3",
     "Way Down We Go": "Kaleo - Way Down We Go.mp3",
@@ -35,8 +35,8 @@ def _normalized_filename(value: str) -> str:
 
 def _resolve_bgm_path(track_name: str) -> Path:
     if not track_name:
-        return AUDIO_DIR / ""
-    exact_path = AUDIO_DIR / BGM_TRACKS.get(track_name, "")
+        return STATIC_AUDIO_DIR / ""
+    exact_path = STATIC_AUDIO_DIR / BGM_TRACKS.get(track_name, "")
     if exact_path.is_file():
         return exact_path
     artist, title = BGM_IDENTIFIERS.get(track_name, (track_name, track_name))
@@ -59,18 +59,12 @@ def _resolve_bgm_path(track_name: str) -> Path:
     return exact_path
 
 
-def _audio_data_uri(path: Path) -> str:
+def _audio_url(path: Path) -> str:
+    """Use Streamlit static hosting instead of embedding audio in every rerun."""
     if not path.is_file():
         return ""
-    suffix = path.suffix.lower()
-    mime = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".ogg": "audio/ogg",
-        ".m4a": "audio/mp4",
-    }.get(suffix, "application/octet-stream")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:{mime};base64,{encoded}"
+    relative_path = path.relative_to(STATIC_AUDIO_DIR).as_posix()
+    return f"/app/static/audio/{quote(relative_path)}"
 
 
 def render_audio(
@@ -83,7 +77,7 @@ def render_audio(
 ) -> None:
     """Render the persistent BGM player and its music controls."""
     tracks = [
-        {"id": track_name, "src": _audio_data_uri(_resolve_bgm_path(track_name))}
+        {"id": track_name, "src": _audio_url(_resolve_bgm_path(track_name))}
         for track_name in track_names
     ]
     payload = {
