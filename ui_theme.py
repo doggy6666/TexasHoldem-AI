@@ -48,6 +48,12 @@ html, body, [class*="css"] {
 [data-testid="stSidebar"],
 [data-testid="collapsedControl"] { display: none !important; }
 
+/* Keep the table visually stable while Streamlit processes cloud reruns. */
+[data-testid="stElementContainer"][data-stale="true"] {
+  opacity: 1 !important;
+  transition: none !important;
+}
+
 .app-shell-header {
   min-height: 76px;
   display: flex;

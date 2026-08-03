@@ -1334,7 +1334,7 @@ else:
     st.session_state.flow_transition_deadline = 0.0
 
 
-@st.fragment(run_every=0.15 if scheduled_transition else None)
+@st.fragment(run_every=0.4 if scheduled_transition else None)
 def advance_game_flow():
     """在独立的无界面片段中推进流程，主页面始终保持正常亮度。"""
     transition_kind = st.session_state.flow_transition_kind
