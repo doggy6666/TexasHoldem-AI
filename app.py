@@ -44,7 +44,7 @@ import audio_manager
 # Reload when a cached module uses an older player interface or asset scheme.
 if (
     "track_names" not in inspect.signature(audio_manager.render_audio).parameters
-    or getattr(audio_manager, "RUNTIME_VERSION", None) != 3
+    or getattr(audio_manager, "RUNTIME_VERSION", None) != 4
 ):
     audio_manager = importlib.reload(audio_manager)
 

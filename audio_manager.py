@@ -10,9 +10,16 @@ from urllib.parse import quote
 import streamlit.components.v1 as components
 
 
-RUNTIME_VERSION = 3
+RUNTIME_VERSION = 4
 STATIC_AUDIO_DIR = Path(__file__).parent / "static" / "audio"
 AUDIO_SEARCH_DIRS = (STATIC_AUDIO_DIR,)
+# Streamlit Community Cloud protects /app/static behind its app session in some
+# deployments.  The browser then receives an HTML login page instead of audio.
+# The tracks are versioned in this public project, so use GitHub's raw file host
+# for the player while retaining local files for validation and development.
+PUBLIC_AUDIO_BASE_URL = (
+    "https://raw.githubusercontent.com/doggy6666/TexasHoldem-AI/main/static/audio"
+)
 BGM_TRACKS = {
     "Experience": "Ludovico Einaudi - Experience.mp3",
     "Way Down We Go": "Kaleo - Way Down We Go.mp3",
@@ -61,11 +68,11 @@ def _resolve_bgm_path(track_name: str) -> Path:
 
 
 def _audio_url(path: Path) -> str:
-    """Use Streamlit static hosting instead of embedding audio in every rerun."""
+    """Return a stable public URL without embedding music on every rerun."""
     if not path.is_file():
         return ""
     relative_path = path.relative_to(STATIC_AUDIO_DIR).as_posix()
-    return f"/app/static/audio/{quote(relative_path)}"
+    return f"{PUBLIC_AUDIO_BASE_URL}/{quote(relative_path)}"
 
 
 def render_audio(
@@ -97,7 +104,7 @@ html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}
 #toggle{{position:relative;width:42px;height:42px;border:1px solid #00e7f0;border-radius:50%;color:#eaffff;background:#12525d;font-size:18px;cursor:pointer}}
 #toggle:hover{{color:#e9ef3a;background:#1b6e77}}
 #toggle.muted{{opacity:.52}}
-#toggle.muted::after{{content:"/";position:absolute;inset:0;display:grid;place-items:center;color:#ff879a;font-size:30px;font-weight:700;line-height:1;pointer-events:none}}
+#toggle.muted::after{{content:"";position:absolute;left:19px;top:2px;width:3px;height:36px;border-radius:2px;background:#ff879a;box-shadow:0 0 5px rgba(255,135,154,.75);transform:rotate(43deg);pointer-events:none}}
 #volume{{width:0;opacity:0;pointer-events:none;accent-color:#18d8df;cursor:pointer;transition:width .18s ease,opacity .18s ease}}
 #audio-group{{display:flex;align-items:center;gap:8px}}
 #audio-group:hover #volume{{width:118px;opacity:1;pointer-events:auto}}
@@ -109,7 +116,7 @@ const config = {config};
 const bgm = document.getElementById('bgm');
 const toggle = document.getElementById('toggle');
 const volume = document.getElementById('volume');
-const settingsVersion = '8';
+const settingsVersion = '9';
 if (window.localStorage.getItem('texas-holdem-audio-settings-version') !== settingsVersion) {{
   window.localStorage.removeItem('texas-holdem-audio-volume');
   window.localStorage.removeItem('texas-holdem-audio-user-volume');
