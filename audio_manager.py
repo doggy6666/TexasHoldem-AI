@@ -10,6 +10,7 @@ from urllib.parse import quote
 import streamlit.components.v1 as components
 
 
+RUNTIME_VERSION = 3
 STATIC_AUDIO_DIR = Path(__file__).parent / "static" / "audio"
 AUDIO_SEARCH_DIRS = (STATIC_AUDIO_DIR,)
 BGM_TRACKS = {
@@ -93,9 +94,10 @@ def render_audio(
 <style>
 html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}
 #controls{{height:58px;display:flex;align-items:center;gap:8px;padding:0 4px;font-family:Segoe UI,sans-serif}}
-#toggle{{width:42px;height:42px;border:1px solid #00e7f0;border-radius:50%;color:#eaffff;background:#12525d;font-size:18px;cursor:pointer}}
+#toggle{{position:relative;width:42px;height:42px;border:1px solid #00e7f0;border-radius:50%;color:#eaffff;background:#12525d;font-size:18px;cursor:pointer}}
 #toggle:hover{{color:#e9ef3a;background:#1b6e77}}
 #toggle.muted{{opacity:.52}}
+#toggle.muted::after{{content:"/";position:absolute;inset:0;display:grid;place-items:center;color:#ff879a;font-size:30px;font-weight:700;line-height:1;pointer-events:none}}
 #volume{{width:0;opacity:0;pointer-events:none;accent-color:#18d8df;cursor:pointer;transition:width .18s ease,opacity .18s ease}}
 #audio-group{{display:flex;align-items:center;gap:8px}}
 #audio-group:hover #volume{{width:118px;opacity:1;pointer-events:auto}}
