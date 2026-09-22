@@ -45,15 +45,15 @@
 
 ## DeepSeek API
 
-API Key 只从 Windows 用户环境变量读取，不写入项目文件：
+本地使用 Git 忽略的 `.streamlit/secrets.toml`，内容为：
 
-```text
-DEEPSEEK_API_KEY=你的 API 密钥
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=你选择的通用模型
+```toml
+DEEPSEEK_API_KEY = "你的新 API 密钥"
 ```
 
-修改环境变量后需要关闭并重新打开终端。不要把 API Key 写入源码、截图、日志或 Git 仓库。
+也可通过服务器环境变量 `DEEPSEEK_API_KEY` 提供密钥；本地 `secrets.toml` 优先。可选的 `DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` 仍通过环境变量设置。修改密钥后重启 Streamlit。不要把密钥写入源码、截图、日志或 Git 仓库。
+
+部署到 Streamlit Community Cloud 时，在应用的 **Settings → Secrets** 中填写同样的 TOML 内容。部署平台不会读取你电脑上的本地文件；不要把 `secrets.toml` 提交到 Git。
 
 ## 如何运行
 
@@ -78,7 +78,7 @@ py -m pytest -q
 
 1. 分别选择线下、简单、进阶、困难、自定义模式并开始新对局。
 2. 确认 AI 姓名右侧只出现一个难度标记，行动栏不重复显示。
-3. 临时移除 `DEEPSEEK_API_KEY` 后重启应用，确认 AI 姓名右侧变为“默认”，牌局仍可继续。
+3. 临时移除本地 `.streamlit/secrets.toml` 中的 `DEEPSEEK_API_KEY`（或环境变量）后重启应用，确认 AI 姓名右侧变为“默认”，牌局仍可继续。
 4. 自定义模式选择不同难度，确认对应座位显示正确标记。
 5. 展开“游戏规则”，确认规则可阅读；点击“示例对局”，查看一次实时策略提示并完成固定牌局。
 6. 在任意阶段让所有未弃牌玩家进入全下，确认手牌立即公开，已有公共牌不消失，剩余公共牌逐街发出。

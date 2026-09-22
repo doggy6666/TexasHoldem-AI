@@ -8,9 +8,20 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import streamlit as st
+
 
 class DeepSeekError(RuntimeError):
     """DeepSeek 请求或响应不可用时抛出的脱敏错误。"""
+
+
+def configured_api_key() -> str:
+    """Read the server-side key from Streamlit secrets or the environment."""
+    try:
+        secret_key = str(st.secrets.get("DEEPSEEK_API_KEY", "")).strip()
+    except FileNotFoundError:
+        secret_key = ""
+    return secret_key or os.getenv("DEEPSEEK_API_KEY", "").strip()
 
 
 @dataclass(frozen=True)
@@ -22,7 +33,7 @@ class DeepSeekClient:
 
     @classmethod
     def from_environment(cls) -> "DeepSeekClient":
-        api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        api_key = configured_api_key()
         if not api_key:
             raise DeepSeekError("未配置 DeepSeek API。")
         return cls(

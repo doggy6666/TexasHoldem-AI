@@ -4,7 +4,6 @@ import base64
 from html import escape
 import importlib
 import inspect
-import os
 import random
 import re
 import time
@@ -20,6 +19,7 @@ from agent.coach import (
     generate_realtime_tip,
     review_cache_key,
 )
+from agent.deepseek_client import configured_api_key
 from agent.modes import GAME_MODES, NOVICE, personas_for_mode, public_label_for_persona
 from agent.router import choose_persona_decision
 from agent.training import build_training_summary
@@ -475,7 +475,7 @@ def settings_dialog():
             custom_labels=random_labels,
             random_start=True,
         )
-    api_configured = bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
+    api_configured = bool(configured_api_key())
     st.caption(
         "线下对战"
         if selected_mode.key == "offline"

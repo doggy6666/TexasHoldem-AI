@@ -5,6 +5,11 @@ __pycache__/
 .idea/
 .streamlit/secrets.toml
 .env
+.env.*
+!.env.example
+
+# Never commit local API credentials.
+TexasHoldem AI API.txt
 
 AGENTS.md
 PROJECT.md
